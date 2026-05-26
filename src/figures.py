@@ -1,6 +1,6 @@
-# Main manuscript figures (1, 2, 3) and the per-profession supplementary figure.
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -18,24 +18,18 @@ from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 
-_SCRIPTS_DIR = Path(__file__).resolve().parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+# Paths
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_CLASSIF = PROJECT_ROOT / "data" / "classification" / "final_adjudicated_classification.csv"
+STATS_DIR = PROJECT_ROOT / "results" / "statistics"
+UNI_META_FILE = PROJECT_ROOT / "data" / "raw" / "대학정보.xlsx"
+RAW_CURR_FILE = PROJECT_ROOT / "data" / "raw" / "교육과정현황조사 최종본.xlsx"
 
-import config
-
-PROJECT_ROOT = _SCRIPTS_DIR.parent
-DATA_CLASSIF = config.CLASSIFICATION_DIR / "final_adjudicated_classification.csv"
-STATS_DIR = config.STATISTICS_DIR
-GAP_STATS_DIR = config.STATISTICS_DIR
-UNI_META_FILE = config.UNIVERSITY_FILE
-
-OUT_DIR = config.FIGURES_DIR
+OUT_DIR = PROJECT_ROOT / "figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Style
-
 def setup_style():
     mpl.rcdefaults()
     mpl.rcParams.update({
@@ -66,6 +60,7 @@ def setup_style():
     })
 
 
+# Page sizes
 SINGLE_COL = 89 / 25.4
 ONE_HALF_COL = 136 / 25.4
 DOUBLE_COL = 183 / 25.4
@@ -86,7 +81,6 @@ def _save(fig, stem: str) -> None:
 
 
 # Constants
-
 COLLEGE_MAP = {"의대": "Medicine", "치대": "Dentistry", "한의대": "Korean Medicine"}
 COLLEGE_ORDER = ["Medicine", "Dentistry", "Korean Medicine"]
 COLLEGE_SHORT = {"Medicine": "Medical", "Dentistry": "Dental", "Korean Medicine": "Korean medicine"}
@@ -136,13 +130,16 @@ COLLEGE_COLORS = {
     "Korean Medicine": "#6ACC64",
 }
 
-MATURITY_ORDER = ["Foundational-Only", "Intermediate", "Advanced"]
+# 4-stage maturity (None at bottom)
+MATURITY_ORDER = ["None", "Foundational-Only", "Intermediate", "Advanced"]
 MATURITY_LABELS = {
+    "None":              "None",
     "Foundational-Only": "Foundational",
     "Intermediate":      "Intermediate",
     "Advanced":          "Advanced",
 }
 MATURITY_COLORS = {
+    "None":              "#CCCCCC",
     "Foundational-Only": "#D65F5F",
     "Intermediate":      "#EE854A",
     "Advanced":          "#4878D0",
@@ -153,7 +150,6 @@ GRID_COLOR = "#D9D9D9"
 
 
 # Data loading
-
 def load_classification() -> pd.DataFrame:
     df = pd.read_csv(DATA_CLASSIF)
     df["College_EN"] = df["College"].map(COLLEGE_MAP)
@@ -161,258 +157,74 @@ def load_classification() -> pd.DataFrame:
     return df
 
 
-def load_university_meta() -> pd.DataFrame:
-    uni = pd.read_excel(UNI_META_FILE)
-    uni.columns = ["College", "University", "Region", "Public_Private", "Admission_Quota"]
-    uni["College_EN"] = uni["College"].map(COLLEGE_MAP)
-    region_map = {
-        "서울경기인천": "Seoul",
-        "강원권": "Non-Seoul",
-        "충청권": "Non-Seoul",
-        "전라제주권": "Non-Seoul",
-        "경남권": "Non-Seoul",
-        "경북권": "Non-Seoul",
-    }
+def load_school() -> pd.DataFrame:
+    df = pd.read_csv(STATS_DIR / "per_school.csv", keep_default_na=False)
+    for c in ["n_courses", "total_credits",
+              "D1_n", "D1_credits", "has_D1",
+              "D2_n", "D2_credits", "has_D2",
+              "D3_n", "D3_credits", "has_D3",
+              "D4_n", "D4_credits", "has_D4",
+              "D5_n", "D5_credits", "has_D5",
+              "Admission_Quota", "Capital_Area",
+              "aicore_count", "has_mandatory_aicore"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
     pp_map = {"국립": "Public", "공립": "Public", "사립": "Private"}
-    uni["Region_Binary"] = uni["Region"].map(region_map)
-    uni["Governance"] = uni["Public_Private"].map(pp_map)
-
-    uni_rename_global = {"차의과학대학교": "차의과대학교"}
-    uni_rename_by_college = {("Dentistry", "단국대학교 글로컬캠퍼스"): "단국대학교"}
-    uni["University"] = uni["University"].replace(uni_rename_global)
-    for (col, old), new in uni_rename_by_college.items():
-        mask = (uni["College_EN"] == col) & (uni["University"] == old)
-        uni.loc[mask, "University"] = new
-
-    return uni
+    df["Governance"] = df["Public_Private"].map(pp_map)
+    df["Region_Binary"] = df["Capital_Area"].map({1: "Capital area",
+                                                  0: "Non-Capital area"})
+    df["AI_Core_Count"] = df[["has_D2", "has_D3", "has_D5"]].sum(axis=1)
+    df["Breadth"] = df[["has_D1", "has_D2", "has_D3", "has_D4", "has_D5"]].sum(axis=1)
+    df = df.rename(columns={"total_credits": "Total_Credits",
+                            "stage": "Maturity",
+                            "College": "College_EN"})
+    return df
 
 
-def build_school_level(course_df: pd.DataFrame, uni_meta: pd.DataFrame) -> pd.DataFrame:
-    school = course_df.groupby(["University", "College_EN"]).agg(
-        Total_Credits=("Credits", "sum"),
-        N_Courses=("Course_ID", "count"),
-        Mandatory_Ratio=("Is_Mandatory_Binary", "mean"),
-    ).reset_index()
-
-    for label, col in DOMAIN_CSVCOL.items():
-        dom_credits = (
-            course_df.assign(_c=course_df["Credits"] * course_df[col])
-            .groupby(["University", "College_EN"])["_c"].sum()
-            .rename(f"Credits_{col}")
-        )
-        dom_has = (
-            course_df.groupby(["University", "College_EN"])[col].max().rename(f"Has_{col}")
-        )
-        school = school.merge(dom_credits, on=["University", "College_EN"], how="left")
-        school = school.merge(dom_has, on=["University", "College_EN"], how="left")
-
-    school = school.fillna({c: 0 for c in school.columns if c.startswith("Credits_") or c.startswith("Has_")})
-
-    school["Breadth"] = sum(school[f"Has_{c}"] for c in ["D1", "D2", "D3", "D4", "D5"])
-    school["AI_Core_Count"] = sum(school[f"Has_{c}"] for c in ["D2", "D3", "D5"])
-
-    def _maturity(row):
-        has_d1 = row["Has_D1"] >= 1
-        ai_core = row["AI_Core_Count"]
-        if has_d1 and ai_core >= 2 and row["Total_Credits"] >= 8:
-            return "Advanced"
-        if ai_core >= 1:
-            return "Intermediate"
-        return "Foundational-Only"
-    school["Maturity"] = school.apply(_maturity, axis=1)
-
-    meta = uni_meta[["University", "College_EN", "Governance", "Region_Binary"]].copy()
-    school = school.merge(meta, on=["University", "College_EN"], how="left")
-
-    return school
+def load_summary() -> dict:
+    with open(STATS_DIR / "summary.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-# Figure 1: Quantitative foundation-centric curriculum (RQ1)
-
-def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
-    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 1.12))
-    gs = fig.add_gridspec(
-        3, 6, hspace=0.62, wspace=1.30,
-        width_ratios=[1, 1, 1, 1, 1, 1],
-        height_ratios=[1.0, 1.05, 1.05],
-    )
-
-    # (a) Domain total credits
-    ax_a = fig.add_subplot(gs[0, :3])
-    domain_dist = pd.read_csv(STATS_DIR / "domain_distribution.csv")
-    domain_dist = domain_dist.set_index("Domain").loc[DOMAIN_ORDER].reset_index()
-
-    y_pos = np.arange(len(domain_dist))[::-1]
-    colors = [DOMAIN_COLORS[d] for d in domain_dist["Domain"]]
-    ax_a.barh(y_pos, domain_dist["Total_Credits"], color=colors, height=0.62,
-              edgecolor="white", linewidth=0.5)
-    ax_a.set_yticks(y_pos)
-    ax_a.set_yticklabels([DOMAIN_SHORT[d] for d in domain_dist["Domain"]],
-                          fontsize=5.8, linespacing=0.95)
-    for yi, (cr, pct) in zip(y_pos, zip(domain_dist["Total_Credits"], domain_dist["Pct_Credits"])):
-        ax_a.text(cr + 5, yi, f"{cr:.1f} ({pct:.1f}%)",
-                  va="center", fontsize=5.5, color="#333333")
-    ax_a.set_xlabel("Total credits across 60 schools")
-    ax_a.set_xlim(0, domain_dist["Total_Credits"].max() * 1.32)
-    _panel_label(ax_a, "a", x=-0.32)
-
-    # (b) Credits per school by college (box+strip)
-    ax_b = fig.add_subplot(gs[0, 3:])
-    rng = np.random.default_rng(42)
-    for i, college in enumerate(COLLEGE_ORDER):
-        vals = school_df[school_df["College_EN"] == college]["Total_Credits"].values
-        bp = ax_b.boxplot([vals], positions=[i], widths=0.55,
-                          patch_artist=True, showfliers=False,
-                          medianprops=dict(color="black", linewidth=0.9),
-                          whiskerprops=dict(linewidth=0.5),
-                          capprops=dict(linewidth=0.5),
-                          boxprops=dict(linewidth=0.5))
-        bp["boxes"][0].set_facecolor(COLLEGE_COLORS[college])
-        bp["boxes"][0].set_alpha(0.35)
-        jitter = rng.uniform(-0.13, 0.13, len(vals))
-        ax_b.scatter(np.full(len(vals), i) + jitter, vals,
-                     c=COLLEGE_COLORS[college], s=10, alpha=0.75,
-                     edgecolors="white", linewidths=0.3, zorder=4)
-
-    ax_b.set_xticks(range(len(COLLEGE_ORDER)))
-    ax_b.set_xticklabels([COLLEGE_SHORT[c] for c in COLLEGE_ORDER], fontsize=6.5)
-    ax_b.set_ylabel("Total credits per school")
-    ax_b.set_ylim(0, school_df["Total_Credits"].max() * 1.18)
-    _panel_label(ax_b, "b", x=-0.18)
-
-    # (c) Adoption rate heatmap (domain × college)
-    ax_c = fig.add_subplot(gs[1, :3])
-    rates = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
-    counts = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
-    n_per_college = {c: (school_df["College_EN"] == c).sum() for c in COLLEGE_ORDER}
-    for j, college in enumerate(COLLEGE_ORDER):
-        sub = school_df[school_df["College_EN"] == college]
-        for i, dom in enumerate(DOMAIN_ORDER):
-            col = f"Has_{DOMAIN_CSVCOL[dom]}"
-            n_off = int((sub[col] >= 1).sum())
-            rates[i, j] = 100 * n_off / n_per_college[college]
-            counts[i, j] = n_off
-
-    base = plt.cm.Blues
-    colors_list = [(1, 1, 1)] + [base(t) for t in np.linspace(0.18, 0.95, 254)]
-    cmap_blue = LinearSegmentedColormap.from_list("white_blues", colors_list, N=256)
-
-    im = ax_c.imshow(rates, cmap=cmap_blue, vmin=0, vmax=100, aspect="auto")
-    ax_c.set_xticks(range(len(COLLEGE_ORDER)))
-    ax_c.set_xticklabels([COLLEGE_SHORT[c] for c in COLLEGE_ORDER], fontsize=6.5)
-    ax_c.set_yticks(range(len(DOMAIN_ORDER)))
-    ax_c.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
-                         fontsize=5.8, linespacing=0.95)
-    for i in range(rates.shape[0]):
-        for j in range(rates.shape[1]):
-            tcol = "white" if rates[i, j] >= 55 else "black"
-            ax_c.text(j, i, f"{rates[i, j]:.1f}%\n({int(counts[i, j])}/{n_per_college[COLLEGE_ORDER[j]]})",
-                      ha="center", va="center", fontsize=5.0, color=tcol,
-                      linespacing=0.95)
-    for s in ax_c.spines.values():
-        s.set_visible(False)
-    cbar = fig.colorbar(im, ax=ax_c, shrink=0.55, aspect=12, pad=0.04)
-    cbar.ax.tick_params(labelsize=5.5, width=0.4)
-    cbar.outline.set_linewidth(0.4)
-    cbar.set_label("Schools offering (%)", fontsize=6)
-    _panel_label(ax_c, "c", x=-0.32)
-
-    # (d) Grade-resolved year × domain heatmap (6 cols)
-    ax_d = fig.add_subplot(gs[1, 3:])
-    stage_share_d = _course_level_stage_share_resolved(course_df)
-
-    stage_labels = {
-        "Pre-1": "Pre\n1",
-        "Pre-2": "Pre\n2",
-        "Med-1": "Med\n1",
-        "Med-2": "Med\n2",
-        "Med-3": "Med\n3",
-        "Med-4": "Med\n4",
-    }
-    cols_d = list(stage_share_d.columns)
-
-    im2 = ax_d.imshow(stage_share_d.values, cmap=cmap_blue,
-                      vmin=0, vmax=100, aspect="auto")
-    ax_d.set_xticks(range(len(cols_d)))
-    ax_d.set_xticklabels([stage_labels[c] for c in cols_d], fontsize=5.6,
-                         linespacing=0.95, rotation=0)
-    ax_d.set_yticks(range(len(DOMAIN_ORDER)))
-    ax_d.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
-                         fontsize=5.8, linespacing=0.95)
-    for i in range(stage_share_d.shape[0]):
-        for j in range(stage_share_d.shape[1]):
-            v = stage_share_d.iloc[i, j]
-            if np.isnan(v) or round(v) == 0:
-                ax_d.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
-                                              facecolor="white", edgecolor="white",
-                                              linewidth=0, zorder=2))
-                continue
-            tcol = "white" if v >= 55 else "black"
-            ax_d.text(j, i, f"{v:.0f}", ha="center", va="center",
-                      fontsize=5.6, color=tcol, zorder=3)
-    for s in ax_d.spines.values():
-        s.set_visible(False)
-    cbar2 = fig.colorbar(im2, ax=ax_d, shrink=0.55, aspect=12, pad=0.04)
-    cbar2.ax.tick_params(labelsize=5.5, width=0.4)
-    cbar2.outline.set_linewidth(0.4)
-    cbar2.set_label("Share of domain courses (%)", fontsize=6)
-    ax_d.set_xlabel("Curriculum stage (grade-resolved subset)")
-    _panel_label(ax_d, "d", x=-0.18)
-
-    # (e) Stage-collapsed full-sample heatmap (Pre/Med)
-    fig.canvas.draw()
-    pos_d = ax_d.get_position()
-    cell_w_d = pos_d.width / 6.0
-    cell_h_d = pos_d.height / len(DOMAIN_ORDER)
-    e_width = 2 * cell_w_d
-    e_height = 5 * cell_h_d
-    bbox_row2 = gs[2, 0].get_position(fig)
-    e_bottom = bbox_row2.y0 + (bbox_row2.height - e_height) * 0.5
-    e_left = 0.5 - e_width / 2.0
-    ax_e = fig.add_axes([e_left, e_bottom, e_width, e_height])
-    cb_pad = 0.005
-    cb_w = e_height * 0.55 / 12
-    cb_h = e_height * 0.55
-    cb_left = e_left + e_width + cb_pad
-    cb_bottom = e_bottom + (e_height - cb_h) / 2
-    cax_e = fig.add_axes([cb_left, cb_bottom, cb_w, cb_h])
-    stage_share_e = _course_level_stage_share_full(course_df)
-
-    stage_labels_e = {"Pre": "Premed", "Med": "Med"}
-    cols_e = list(stage_share_e.columns)
-
-    im3 = ax_e.imshow(stage_share_e.values, cmap=cmap_blue,
-                      vmin=0, vmax=100, aspect="auto")
-    ax_e.set_xticks(range(len(cols_e)))
-    ax_e.set_xticklabels([stage_labels_e[c] for c in cols_e], fontsize=5.6)
-    ax_e.set_yticks(range(len(DOMAIN_ORDER)))
-    ax_e.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
-                         fontsize=5.8, linespacing=0.95)
-    for i in range(stage_share_e.shape[0]):
-        for j in range(stage_share_e.shape[1]):
-            v = stage_share_e.iloc[i, j]
-            if np.isnan(v) or round(v) == 0:
-                ax_e.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
-                                              facecolor="white", edgecolor="white",
-                                              linewidth=0, zorder=2))
-                continue
-            tcol = "white" if v >= 55 else "black"
-            ax_e.text(j, i, f"{v:.0f}", ha="center", va="center",
-                      fontsize=5.6, color=tcol, zorder=3)
-    for s in ax_e.spines.values():
-        s.set_visible(False)
-    cbar3 = fig.colorbar(im3, cax=cax_e)
-    cbar3.ax.tick_params(labelsize=5.5, width=0.4)
-    cbar3.outline.set_linewidth(0.4)
-    cbar3.set_label("Share of domain courses (%)", fontsize=6)
-    ax_e.set_xlabel("Curriculum stage (full sample, collapsed)")
-    _panel_label(ax_e, "e", x=-0.55)
-
-    _save(fig, "Figure_1")
+# Course-level derived statistics
+def compute_domain_distribution(course_df: pd.DataFrame,
+                                school_df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    total_credits_all = float(course_df["Credits"].sum())
+    n_schools_total = len(school_df)
+    for dom in DOMAIN_ORDER:
+        col = DOMAIN_CSVCOL[dom]
+        dom_courses = course_df[course_df[col] == 1]
+        total = float((dom_courses["Credits"]).sum())
+        n_offering = int((school_df[f"has_{col}"] >= 1).sum())
+        rows.append({
+            "Domain": dom,
+            "Total_Credits": total,
+            "Pct_Credits": 100.0 * total / total_credits_all,
+            "N_Schools": n_offering,
+            "Pct_Schools": 100.0 * n_offering / n_schools_total,
+        })
+    return pd.DataFrame(rows).set_index("Domain").loc[DOMAIN_ORDER].reset_index()
 
 
+def compute_mandatory_by_domain(course_df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for dom in DOMAIN_ORDER:
+        col = DOMAIN_CSVCOL[dom]
+        sub = course_df[course_df[col] == 1]
+        n = len(sub)
+        nm = int(sub["Is_Mandatory_Binary"].sum())
+        rows.append({
+            "Domain": dom,
+            "N_Courses": n,
+            "N_Mandatory": nm,
+            "Pct_Mandatory": 100.0 * nm / n if n > 0 else 0.0,
+        })
+    return pd.DataFrame(rows).set_index("Domain").loc[DOMAIN_ORDER].reset_index()
+
+
+# Year-stage helpers
 def _load_year_merged(course_df: pd.DataFrame) -> pd.DataFrame:
-    raw = pd.read_excel(UNI_META_FILE.parent / "교육과정현황조사 최종본.xlsx")
+    raw = pd.read_excel(RAW_CURR_FILE)
     raw.columns = [
         "College", "University", "Course_Name", "Prog_SW", "Math_Stat",
         "Informatics", "AI", "DataSci", "Pre_Medical", "Medical",
@@ -518,9 +330,190 @@ def _course_level_stage_share_full(course_df: pd.DataFrame,
     return pd.DataFrame(pct, index=DOMAIN_ORDER, columns=stages)
 
 
-# Figure 2: Institutionalization of AI-specific domains (RQ2)
+# Figure 1
+def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
+    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 1.12))
+    gs = fig.add_gridspec(
+        3, 6, hspace=0.62, wspace=1.30,
+        width_ratios=[1, 1, 1, 1, 1, 1],
+        height_ratios=[1.0, 1.05, 1.05],
+    )
 
-def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
+    # (a) Domain total credits
+    ax_a = fig.add_subplot(gs[0, :3])
+    domain_dist = compute_domain_distribution(course_df, school_df)
+
+    y_pos = np.arange(len(domain_dist))[::-1]
+    colors = [DOMAIN_COLORS[d] for d in domain_dist["Domain"]]
+    ax_a.barh(y_pos, domain_dist["Total_Credits"], color=colors, height=0.62,
+              edgecolor="white", linewidth=0.5)
+    ax_a.set_yticks(y_pos)
+    ax_a.set_yticklabels([DOMAIN_SHORT[d] for d in domain_dist["Domain"]],
+                          fontsize=5.8, linespacing=0.95)
+    for yi, (cr, pct) in zip(y_pos, zip(domain_dist["Total_Credits"], domain_dist["Pct_Credits"])):
+        ax_a.text(cr + 5, yi, f"{cr:.1f} ({pct:.1f}%)",
+                  va="center", fontsize=5.5, color="#333333")
+    ax_a.set_xlabel("Total credits across 63 schools")
+    ax_a.set_xlim(0, domain_dist["Total_Credits"].max() * 1.32)
+    _panel_label(ax_a, "a", x=-0.32)
+
+    # (b) Credits per school by college
+    ax_b = fig.add_subplot(gs[0, 3:])
+    rng = np.random.default_rng(42)
+    for i, college in enumerate(COLLEGE_ORDER):
+        vals = school_df[school_df["College_EN"] == college]["Total_Credits"].values
+        bp = ax_b.boxplot([vals], positions=[i], widths=0.55,
+                          patch_artist=True, showfliers=False,
+                          medianprops=dict(color="black", linewidth=0.9),
+                          whiskerprops=dict(linewidth=0.5),
+                          capprops=dict(linewidth=0.5),
+                          boxprops=dict(linewidth=0.5))
+        bp["boxes"][0].set_facecolor(COLLEGE_COLORS[college])
+        bp["boxes"][0].set_alpha(0.35)
+        jitter = rng.uniform(-0.13, 0.13, len(vals))
+        ax_b.scatter(np.full(len(vals), i) + jitter, vals,
+                     c=COLLEGE_COLORS[college], s=10, alpha=0.75,
+                     edgecolors="white", linewidths=0.3, zorder=4)
+
+    ax_b.set_xticks(range(len(COLLEGE_ORDER)))
+    n_per_college = {c: int((school_df["College_EN"] == c).sum()) for c in COLLEGE_ORDER}
+    ax_b.set_xticklabels(
+        [f"{COLLEGE_SHORT[c]}\n(n={n_per_college[c]})" for c in COLLEGE_ORDER],
+        fontsize=6.5, linespacing=0.95)
+    ax_b.set_ylabel("Total credits per school")
+    ax_b.set_ylim(0, school_df["Total_Credits"].max() * 1.18)
+    _panel_label(ax_b, "b", x=-0.18)
+
+    # (c) Adoption rate heatmap (domain x college)
+    ax_c = fig.add_subplot(gs[1, :3])
+    rates = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
+    counts = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
+    for j, college in enumerate(COLLEGE_ORDER):
+        sub = school_df[school_df["College_EN"] == college]
+        for i, dom in enumerate(DOMAIN_ORDER):
+            col = f"has_{DOMAIN_CSVCOL[dom]}"
+            n_off = int((sub[col] >= 1).sum())
+            rates[i, j] = 100 * n_off / n_per_college[college]
+            counts[i, j] = n_off
+
+    base = plt.cm.Blues
+    colors_list = [(1, 1, 1)] + [base(t) for t in np.linspace(0.18, 0.95, 254)]
+    cmap_blue = LinearSegmentedColormap.from_list("white_blues", colors_list, N=256)
+
+    im = ax_c.imshow(rates, cmap=cmap_blue, vmin=0, vmax=100, aspect="auto")
+    ax_c.set_xticks(range(len(COLLEGE_ORDER)))
+    ax_c.set_xticklabels([COLLEGE_SHORT[c] for c in COLLEGE_ORDER], fontsize=6.5)
+    ax_c.set_yticks(range(len(DOMAIN_ORDER)))
+    ax_c.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
+                         fontsize=5.8, linespacing=0.95)
+    for i in range(rates.shape[0]):
+        for j in range(rates.shape[1]):
+            tcol = "white" if rates[i, j] >= 55 else "black"
+            ax_c.text(j, i, f"{rates[i, j]:.1f}%\n({int(counts[i, j])}/{n_per_college[COLLEGE_ORDER[j]]})",
+                      ha="center", va="center", fontsize=5.0, color=tcol,
+                      linespacing=0.95)
+    for s in ax_c.spines.values():
+        s.set_visible(False)
+    cbar = fig.colorbar(im, ax=ax_c, shrink=0.55, aspect=12, pad=0.04)
+    cbar.ax.tick_params(labelsize=5.5, width=0.4)
+    cbar.outline.set_linewidth(0.4)
+    cbar.set_label("Schools offering (%)", fontsize=6)
+    _panel_label(ax_c, "c", x=-0.32)
+
+    # (d) Grade-resolved year x domain heatmap
+    ax_d = fig.add_subplot(gs[1, 3:])
+    stage_share_d = _course_level_stage_share_resolved(course_df)
+
+    stage_labels = {
+        "Pre-1": "Pre\n1", "Pre-2": "Pre\n2",
+        "Med-1": "Med\n1", "Med-2": "Med\n2",
+        "Med-3": "Med\n3", "Med-4": "Med\n4",
+    }
+    cols_d = list(stage_share_d.columns)
+
+    im2 = ax_d.imshow(stage_share_d.values, cmap=cmap_blue,
+                      vmin=0, vmax=100, aspect="auto")
+    ax_d.set_xticks(range(len(cols_d)))
+    ax_d.set_xticklabels([stage_labels[c] for c in cols_d], fontsize=5.6,
+                         linespacing=0.95, rotation=0)
+    ax_d.set_yticks(range(len(DOMAIN_ORDER)))
+    ax_d.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
+                         fontsize=5.8, linespacing=0.95)
+    for i in range(stage_share_d.shape[0]):
+        for j in range(stage_share_d.shape[1]):
+            v = stage_share_d.iloc[i, j]
+            if np.isnan(v) or round(v) == 0:
+                ax_d.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                                              facecolor="white", edgecolor="white",
+                                              linewidth=0, zorder=2))
+                continue
+            tcol = "white" if v >= 55 else "black"
+            ax_d.text(j, i, f"{v:.0f}", ha="center", va="center",
+                      fontsize=5.6, color=tcol, zorder=3)
+    for s in ax_d.spines.values():
+        s.set_visible(False)
+    cbar2 = fig.colorbar(im2, ax=ax_d, shrink=0.55, aspect=12, pad=0.04)
+    cbar2.ax.tick_params(labelsize=5.5, width=0.4)
+    cbar2.outline.set_linewidth(0.4)
+    cbar2.set_label("Share of domain courses (%)", fontsize=6)
+    ax_d.set_xlabel("Curriculum stage (grade-resolved subset)")
+    _panel_label(ax_d, "d", x=-0.18)
+
+    # (e) Stage-collapsed full-sample heatmap
+    fig.canvas.draw()
+    pos_d = ax_d.get_position()
+    cell_w_d = pos_d.width / 6.0
+    cell_h_d = pos_d.height / len(DOMAIN_ORDER)
+    e_width = 2 * cell_w_d
+    e_height = 5 * cell_h_d
+    bbox_row2 = gs[2, 0].get_position(fig)
+    e_bottom = bbox_row2.y0 + (bbox_row2.height - e_height) * 0.5
+    e_left = 0.5 - e_width / 2.0
+    ax_e = fig.add_axes([e_left, e_bottom, e_width, e_height])
+    cb_pad = 0.005
+    cb_w = e_height * 0.55 / 12
+    cb_h = e_height * 0.55
+    cb_left = e_left + e_width + cb_pad
+    cb_bottom = e_bottom + (e_height - cb_h) / 2
+    cax_e = fig.add_axes([cb_left, cb_bottom, cb_w, cb_h])
+    stage_share_e = _course_level_stage_share_full(course_df)
+
+    stage_labels_e = {"Pre": "Premed", "Med": "Med"}
+    cols_e = list(stage_share_e.columns)
+
+    im3 = ax_e.imshow(stage_share_e.values, cmap=cmap_blue,
+                      vmin=0, vmax=100, aspect="auto")
+    ax_e.set_xticks(range(len(cols_e)))
+    ax_e.set_xticklabels([stage_labels_e[c] for c in cols_e], fontsize=5.6)
+    ax_e.set_yticks(range(len(DOMAIN_ORDER)))
+    ax_e.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
+                         fontsize=5.8, linespacing=0.95)
+    for i in range(stage_share_e.shape[0]):
+        for j in range(stage_share_e.shape[1]):
+            v = stage_share_e.iloc[i, j]
+            if np.isnan(v) or round(v) == 0:
+                ax_e.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                                              facecolor="white", edgecolor="white",
+                                              linewidth=0, zorder=2))
+                continue
+            tcol = "white" if v >= 55 else "black"
+            ax_e.text(j, i, f"{v:.0f}", ha="center", va="center",
+                      fontsize=5.6, color=tcol, zorder=3)
+    for s in ax_e.spines.values():
+        s.set_visible(False)
+    cbar3 = fig.colorbar(im3, cax=cax_e)
+    cbar3.ax.tick_params(labelsize=5.5, width=0.4)
+    cbar3.outline.set_linewidth(0.4)
+    cbar3.set_label("Share of domain courses (%)", fontsize=6)
+    ax_e.set_xlabel("Curriculum stage")
+    _panel_label(ax_e, "e", x=-0.55)
+
+    _save(fig, "Figure_1")
+
+
+# Figure 2
+def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
+            summary: dict) -> None:
     fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 0.70))
     gs = fig.add_gridspec(
         2, 6,
@@ -534,9 +527,7 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_e = fig.add_subplot(gs[1, 4:])
 
     # (a) Mandatory share by domain
-    mandatory_df = pd.read_csv(STATS_DIR / "mandatory_by_domain.csv")
-    mandatory_df = mandatory_df.set_index("Domain").loc[DOMAIN_ORDER].reset_index()
-
+    mandatory_df = compute_mandatory_by_domain(course_df)
     y_pos = np.arange(len(mandatory_df))[::-1]
     colors = [DOMAIN_COLORS[d] for d in mandatory_df["Domain"]]
     ax_a.barh(y_pos, mandatory_df["Pct_Mandatory"], color=colors, height=0.62,
@@ -556,16 +547,14 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                   va="center", fontsize=5.5, color="#333333")
     _panel_label(ax_a, "a", x=-0.32)
 
-    # (b) Institutionalization map (adoption % vs mandatory %)
-    domain_dist = pd.read_csv(STATS_DIR / "domain_distribution.csv")
+    # (b) Institutionalization map
+    domain_dist = compute_domain_distribution(course_df, school_df)
     merge_b = mandatory_df.merge(domain_dist[["Domain", "Pct_Schools", "Pct_Credits"]],
                                  on="Domain")
     merge_b = merge_b.set_index("Domain").loc[DOMAIN_ORDER].reset_index()
 
-    K_LIN = 0.32
-    BASE_DIAM = 2.0
-    diam = BASE_DIAM + K_LIN * merge_b["Pct_Credits"].to_numpy()
-    sizes = diam ** 2
+    K_AREA = 7.71
+    sizes = K_AREA * merge_b["Pct_Credits"].to_numpy()
     colors_b = [DOMAIN_COLORS[d] for d in merge_b["Domain"]]
     ax_b.scatter(merge_b["Pct_Schools"], merge_b["Pct_Mandatory"],
                  s=sizes, c=colors_b, edgecolor="black", linewidth=0.5,
@@ -588,7 +577,7 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
 
     ax_b.set_xlim(0, 115)
     ax_b.set_ylim(0, 100)
-    ax_b.set_xlabel("Schools offering domain (%)")
+    ax_b.set_xlabel("Schools offering domain (% of n=63)")
     ax_b.set_ylabel("Mandatory courses (%)")
     ax_b.axhline(50, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
     ax_b.axvline(50, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
@@ -596,8 +585,7 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     legend_pcts = [20, 40, 60]
     handles_b = []
     for p in legend_pcts:
-        diam_p = BASE_DIAM + K_LIN * p
-        s = diam_p ** 2
+        s = K_AREA * p
         handles_b.append(ax_b.scatter([], [], s=s, c="#BBBBBB",
                                       edgecolor="black", linewidth=0.4))
     ax_b.legend(handles_b, [f"{p}%" for p in legend_pcts],
@@ -609,7 +597,7 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                 handletextpad=1.6)
     _panel_label(ax_b, "b", x=-0.18)
 
-    # (c) Maturity by college (stacked bar)
+    # (c) Maturity by college (4-stage stacked bar)
     maturity_cross = pd.crosstab(school_df["College_EN"], school_df["Maturity"])
     for m in MATURITY_ORDER:
         if m not in maturity_cross.columns:
@@ -627,13 +615,6 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
         ax_c.bar(x, vals, bottom=bottom, width=0.55,
                  color=MATURITY_COLORS[m], label=MATURITY_LABELS[m],
                  edgecolor="white", linewidth=0.5)
-        for i, v in enumerate(vals):
-            if v >= 4:
-                txt_color = "white" if m != "Foundational-Only" else "white"
-                ax_c.text(i, bottom[i] + v / 2,
-                          f"{v:.1f}%\n(n={int(maturity_cross[m].iloc[i])})",
-                          ha="center", va="center", fontsize=5.0,
-                          color=txt_color, linespacing=0.95)
         bottom += vals
 
     ax_c.set_xticks(x)
@@ -643,11 +624,11 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_c.set_ylabel("Schools (%)")
     ax_c.set_ylim(0, 100)
     ax_c.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18),
-                ncol=3, frameon=False, fontsize=5.5,
-                handletextpad=0.4, columnspacing=0.8)
+                ncol=4, frameon=False, fontsize=5.2,
+                handletextpad=0.4, columnspacing=0.7)
     _panel_label(ax_c, "c", x=-0.30)
 
-    # (d) Breadth-depth scatter (maturity-only encoding)
+    # (d) Breadth-depth scatter
     rng = np.random.default_rng(42)
     bd = school_df[["University", "College_EN", "Breadth", "Total_Credits", "Maturity"]].copy()
     bd["Depth"] = bd["Total_Credits"]
@@ -662,53 +643,60 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
         yj = ys + rng.uniform(-0.20, 0.20, len(ys))
         ax_d.scatter(xj, yj, c=MATURITY_COLORS[m],
                      marker="o",
-                     s=18, alpha=0.78, edgecolors="white", linewidths=0.3,
+                     s=18, alpha=0.85, edgecolors="white", linewidths=0.4,
                      zorder=3)
 
-    b_med = bd["Breadth"].median()
-    d_med = bd["Depth"].median()
+    b_med = bd[bd["Maturity"] != "None"]["Breadth"].median()
+    d_med = bd[bd["Maturity"] != "None"]["Depth"].median()
     ax_d.axhline(d_med, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
     ax_d.axvline(b_med, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
 
     ax_d.set_xlabel("Breadth (n domains)")
     ax_d.set_ylabel("Total credits")
-    ax_d.set_xlim(0.3, bd["Breadth"].max() + 0.7)
-    ax_d.set_xticks(range(1, int(bd["Breadth"].max()) + 1))
+    ax_d.set_xlim(-0.5, bd["Breadth"].max() + 0.7)
+    ax_d.set_xticks(range(0, int(bd["Breadth"].max()) + 1))
 
     handles_maturity = [
         ax_d.scatter([], [], c=MATURITY_COLORS[m], marker="o",
-                     s=18, edgecolors="white", linewidths=0.3,
+                     s=18, edgecolors="white",
+                     linewidths=0.3,
                      label=MATURITY_LABELS[m])
         for m in MATURITY_ORDER
     ]
     ax_d.legend(handles=handles_maturity, title="Maturity",
                 loc="upper center", bbox_to_anchor=(0.5, -0.22),
-                ncol=3, frameon=False, fontsize=5.5,
+                ncol=4, frameon=False, fontsize=5.2,
                 title_fontsize=5.5,
-                handletextpad=0.3, columnspacing=0.8,
+                handletextpad=0.3, columnspacing=0.7,
                 borderpad=0.2)
     _panel_label(ax_d, "d", x=-0.22)
 
-    # (e) Transition resources (mean only)
-    gap = pd.read_csv(STATS_DIR / "gap_analysis.csv")
-    transitions_stats = []
-    for src_level, label, next_level in [
-        ("Foundational-Only", "Foundational→Intermediate", "Intermediate"),
-        ("Intermediate",       "Intermediate→Advanced",     "Advanced"),
-    ]:
-        sub = gap[gap["Current_Level"] == src_level]
-        cr_mean = sub["Additional_Credits_Needed"].mean()
-        dm_mean = sub["Additional_Domains_Needed"].mean()
-        transitions_stats.append({
-            "label": label,
-            "cr_mean": cr_mean,
-            "dm_mean": dm_mean,
-        })
+    # (e) Transition resources
+    # Foundational-Only → Intermediate: per gap analysis, +1 AI-core domain.
+    # Credits gap is 0 in the formal stage definition, but in practice adopting
+    # a new AI-core course costs credits. We display the median AI-core course
+    # credit in the analyzed cohort (D2|D3|D5, n=54, median=2.0) as the
+    # indicative additional-credit resource.
+    AICORE_COURSE_CREDIT_MEDIAN = 2.0
+    gap = summary["gap_to_next_stage"]
+    transitions_stats = [
+        {"label": "Foundational\n→ Intermediate",
+         "cr_mean": AICORE_COURSE_CREDIT_MEDIAN,
+         "dm_mean": gap["Foundational-Only"]["mean_need_aicore_domains"],
+         "mand_mean": gap["Foundational-Only"]["mean_need_mandatory_aicore"],
+         "kind": "domain step"},
+        {"label": "Intermediate\n→ Advanced",
+         "cr_mean": gap["Intermediate"]["mean_need_credits"],
+         "dm_mean": gap["Intermediate"]["mean_need_aicore_domains"],
+         "mand_mean": gap["Intermediate"]["mean_need_mandatory_aicore"],
+         "kind": "credits + mandatory"},
+    ]
 
     y_pos = np.arange(len(transitions_stats))[::-1]
     bar_h = 0.34
     credits_means = [t["cr_mean"] for t in transitions_stats]
     domains_means = [t["dm_mean"] for t in transitions_stats]
+    mand_means = [t["mand_mean"] for t in transitions_stats]
     labels = [t["label"] for t in transitions_stats]
 
     ax_e.barh(y_pos + bar_h / 2, credits_means, bar_h,
@@ -717,11 +705,11 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_e.barh(y_pos - bar_h / 2, domains_means, bar_h,
               color="#EE854A", label="Additional AI-core domains",
               edgecolor="white", linewidth=0.5)
-    for yi, cr_m, dm_m in zip(y_pos, credits_means, domains_means):
+    for yi, cr_m, dm_m, mand_m in zip(y_pos, credits_means, domains_means, mand_means):
         if abs(cr_m - round(cr_m)) < 1e-9:
             cr_label = f"{cr_m:.0f}"
         else:
-            cr_label = f"{cr_m:.1f}"
+            cr_label = f"{cr_m:.2f}"
         if abs(dm_m - round(dm_m)) < 1e-9:
             dm_label = f"{dm_m:.0f}"
         else:
@@ -730,11 +718,12 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                   va="center", fontsize=5.5)
         ax_e.text(dm_m + 0.10, yi - bar_h / 2, dm_label,
                   va="center", fontsize=5.5)
+
     ax_e.set_yticks(y_pos)
-    ax_e.set_yticklabels([l.replace("→", "\n→ ") for l in labels],
-                        fontsize=5.5, linespacing=0.95)
+    ax_e.set_yticklabels(labels, fontsize=5.5, linespacing=0.95)
     ax_e.set_xlabel("Additional resource (mean)")
-    ax_e.set_xlim(0, max(credits_means) * 1.18 + 0.4)
+    max_val = max(max(credits_means), max(domains_means))
+    ax_e.set_xlim(0, max_val * 1.30 + 0.4)
     ax_e.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24),
                 ncol=1, frameon=False, fontsize=5.5,
                 handletextpad=0.4)
@@ -743,9 +732,9 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     _save(fig, "Figure_2")
 
 
-# Figure 3: Structure of cross-school variation (RQ3)
-
-def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
+# Figure 3
+def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame,
+            summary: dict) -> None:
     BASE_WIDTH = DOUBLE_COL
     NEW_WIDTH = BASE_WIDTH * (4.1 / 3.0)
     fig = plt.figure(figsize=(NEW_WIDTH, DOUBLE_COL * 0.38))
@@ -758,7 +747,7 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_b = fig.add_subplot(gs[0, 1])
     ax_c = fig.add_subplot(gs[0, 2])
 
-    # (a) Mandatory % by domain × college (grouped bar)
+    # (a) Mandatory % by domain x college
     DOMAIN_FOR_A = DOMAIN_ORDER
     n_dom = len(DOMAIN_FOR_A)
     bar_w = 0.25
@@ -794,7 +783,7 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                 handlelength=1.0, handletextpad=0.4, ncol=1)
     _panel_label(ax_a, "a", x=-0.12)
 
-    # (b) Maturity by governance
+    # (b) Maturity by governance (4-stage)
     gov_cross = pd.crosstab(school_df["Governance"], school_df["Maturity"])
     for m in MATURITY_ORDER:
         if m not in gov_cross.columns:
@@ -813,10 +802,11 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                  label=MATURITY_LABELS[m])
         for i, v in enumerate(vals):
             if v >= 4:
+                txt_color = "#333333" if m == "None" else "white"
                 ax_b.text(i, bottom[i] + v / 2,
                           f"{v:.1f}%\n(n={int(gov_cross[m].iloc[i])})",
                           ha="center", va="center", fontsize=5.0,
-                          color="white", linespacing=0.95)
+                          color=txt_color, linespacing=0.95)
         bottom += vals
 
     ax_b.set_xticks(x)
@@ -825,40 +815,37 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
         fontsize=5.8, linespacing=0.95)
     ax_b.set_ylabel("Schools (%)")
     ax_b.set_ylim(0, 100)
+
     ax_b.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
-                ncol=3, frameon=False, fontsize=5.5,
-                handletextpad=0.3, columnspacing=0.6)
+                ncol=4, frameon=False, fontsize=5.2,
+                handletextpad=0.3, columnspacing=0.5)
     _panel_label(ax_b, "b", x=-0.25)
 
     # (c) Stratum-level mandatory gap connecting points
-    profession_df = pd.read_csv(GAP_STATS_DIR / "gap_stratified_college.csv")
-    governance_df = pd.read_csv(GAP_STATS_DIR / "gap_stratified_governance.csv")
-    region_df = pd.read_csv(GAP_STATS_DIR / "gap_stratified_region.csv")
+    strat_df = pd.read_csv(STATS_DIR / "mandatory_gap_stratified.csv")
 
     AXIS_PROF = "#4878D0"
     AXIS_GOV = "#EE854A"
     AXIS_REG = "#6ACC64"
 
-    profession_df = profession_df.rename(columns={"College": "level"})
-    governance_df = governance_df.rename(columns={"Governance": "level"})
-    region_df = region_df.rename(columns={"Region_Binary": "level"})
-
     label_map = {
         "Medicine": "Medical",
         "Dentistry": "Dental",
         "Korean Medicine": "Korean medicine",
-        "Public": "Public",
-        "Private": "Private",
-        "Seoul": "Capital area",
-        "Non-Seoul": "Non-Capital area",
+        "국립": "Public",
+        "사립": "Private",
+        "1": "Capital area",
+        "0": "Non-Capital area",
     }
 
     rows = []
-    for axis_name, axis_color, df_axis, order_levels in [
-        ("Profession", AXIS_PROF, profession_df, ["Medicine", "Dentistry", "Korean Medicine"]),
-        ("Governance", AXIS_GOV, governance_df, ["Public", "Private"]),
-        ("Region",     AXIS_REG, region_df,     ["Seoul", "Non-Seoul"]),
+    for axis_name, axis_color, axis_key, order_levels in [
+        ("Profession", AXIS_PROF, "College",    ["Medicine", "Dentistry", "Korean Medicine"]),
+        ("Governance", AXIS_GOV,  "Governance", ["국립", "사립"]),
+        ("Region",     AXIS_REG,  "Region",     ["1", "0"]),
     ]:
+        df_axis = strat_df[strat_df["axis"] == axis_key].copy()
+        df_axis["level"] = df_axis["level"].astype(str)
         for lv in order_levels:
             sub = df_axis[df_axis["level"] == lv]
             if len(sub) == 0:
@@ -868,10 +855,10 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                 "axis": axis_name,
                 "axis_color": axis_color,
                 "label": label_map.get(lv, lv),
-                "Foundational_Mandatory_Pct": float(r["Foundational_Mandatory_Pct"]),
-                "AI_Specific_Mandatory_Pct": float(r["AI_Specific_Mandatory_Pct"]),
-                "Gap_Pct_Points": float(r["Gap_Pct_Points"]),
-                "Fisher_p": float(r["Fisher_p"]),
+                "Foundational_Mandatory_Pct": float(r["D1_pct"]),
+                "AI_Specific_Mandatory_Pct": float(r["AI_pct"]),
+                "Gap_Pct_Points": float(r["gap_pp"]),
+                "Fisher_p": float(r["P_fisher"]),
             })
     strat = pd.DataFrame(rows)
 
@@ -923,9 +910,8 @@ def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     _save(fig, "Figure_3")
 
 
-# Supplementary: Per-profession year × domain placement
-
-def supplementary_per_profession(course_df: pd.DataFrame) -> None:
+# Supplementary Note 5: per-profession year x domain placement
+def supplementary_note_5(course_df: pd.DataFrame) -> None:
     base = plt.cm.Blues
     colors_list = [(1, 1, 1)] + [base(t) for t in np.linspace(0.18, 0.95, 254)]
     cmap_blue = LinearSegmentedColormap.from_list("white_blues", colors_list, N=256)
@@ -1052,38 +1038,43 @@ def supplementary_per_profession(course_df: pd.DataFrame) -> None:
         cbar_bot.outline.set_linewidth(0.4)
         cbar_bot.set_label("Share of domain courses (%)", fontsize=6)
 
-    _save(fig, "Supplementary_PerProfession")
+    _save(fig, "Supplementary_Note_5_PerProfession")
 
 
 # Main
-
 def main() -> int:
     print("=" * 70)
-    print("Manuscript figures (1, 2, 3) + supplementary")
+    print("Figures (1, 2, 3) + Supplementary Note 5")
     print("=" * 70)
 
     setup_style()
     course_df = load_classification()
-    uni_meta = load_university_meta()
-    school_df = build_school_level(course_df, uni_meta)
+    school_df = load_school()
+    summary = load_summary()
 
     print(f"  Loaded {len(course_df)} courses across {len(school_df)} schools")
     print(f"  Schools per college: " +
           ", ".join(f"{c}={(school_df['College_EN']==c).sum()}" for c in COLLEGE_ORDER))
     print(f"  Maturity counts: " +
           ", ".join(f"{m}={(school_df['Maturity']==m).sum()}" for m in MATURITY_ORDER))
+    print(f"  Capital_Area: " +
+          ", ".join(f"{r}={(school_df['Region_Binary']==r).sum()}"
+                    for r in ["Capital area", "Non-Capital area"]))
+    print(f"  Governance: " +
+          ", ".join(f"{g}={(school_df['Governance']==g).sum()}"
+                    for g in ["Public", "Private"]))
 
-    print("\n  Figure 1: Quantitative foundation-centric curriculum (RQ1)...")
+    print("\n  Figure 1: Quantitative foundation-centric curriculum...")
     figure1(course_df, school_df)
 
-    print("\n  Figure 2: AI-specific institutionalization (RQ2)...")
-    figure2(course_df, school_df)
+    print("\n  Figure 2: AI-specific institutionalization...")
+    figure2(course_df, school_df, summary)
 
-    print("\n  Figure 3: Structure of cross-school variation (RQ3)...")
-    figure3(course_df, school_df)
+    print("\n  Figure 3: Structure of cross-school variation...")
+    figure3(course_df, school_df, summary)
 
-    print("\n  Supplementary: Per-profession year × domain placement...")
-    supplementary_per_profession(course_df)
+    print("\n  Supplementary Note 5: Per-profession year x domain placement...")
+    supplementary_note_5(course_df)
 
     print("\nDone.")
     return 0

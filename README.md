@@ -3,52 +3,75 @@
 Repository: https://github.com/ggg5438/med_school_AI_edu_status
 
 Analysis code for a national cross-sectional document analysis of AI- and
-data-science-related coursework across Korean medical, dental, and Korean
-medicine schools. The study characterizes how mature each school's AI/data
-science curriculum is along five content domains, and analyzes how curriculum
-maturity varies by profession, governance (public vs private), and region. The
-cohort comprises 179 AI/DS-related courses across 60 schools (38 medical, 11
-dental, 11 Korean medicine). The headline finding is structural: quantitative
-foundations are widely adopted and largely mandatory, while applied AI content
-is smaller, less consistently offered, and more often elective.
+data-science-related coursework across all 63 accredited Korean medical
+(n=40), dental (n=11), and Korean medicine (n=12) schools. The study
+characterizes how mature each school's AI/DS curriculum is along five content
+domains, and analyzes how curriculum maturity varies by profession, governance
+(public vs private), and region (Capital area vs Non-Capital area).
+
+The headline finding is structural. Quantitative foundations dominate the AI/DS
+coursework, accounting for 62.2% of all credits offered, and are typically
+mandatory. AI-specific content is smaller, less consistently offered, and more
+often elective. Only 5 of 63 schools (7.9%) reach the Advanced curriculum
+stage. Among the 30 schools at the Intermediate stage, 13 (43%) lack only a
+mandatory AI-core course — they already meet the credit and breadth thresholds
+and could move to Advanced by converting one existing elective into a required
+course. Curriculum maturity shows no association with public/private
+governance or with Capital-area location.
 
 ## What this code does
 
 Starting from a frozen, human-adjudicated course classification (each course
-labelled across five domains) and the raw curriculum and institutional
-metadata, the pipeline reproduces every statistic, table, and figure reported in
-the manuscript:
+labelled across five domains) and the raw institutional metadata, the pipeline
+reproduces every statistic, table, and figure reported in the manuscript:
 
-- Domain credit distribution and school-level adoption rates
-- Mandatory-vs-elective ratios by domain
-- Curriculum maturity stages (Foundational-Only / Intermediate / Advanced) and
-  the gap to the next stage
-- Descriptive Table 1
+- Domain credit distribution and school-level adoption rates (denominator n=63)
+- Course-level mandatory share by domain
+- Curriculum maturity classification across four stages (None,
+  Foundational-Only, Intermediate, Advanced) using the Option B Advanced
+  definition
+- Per-school gap analysis: credits, AI-core domains, and mandatory AI-core
+  courses needed to reach the next stage
+- Stratified mandatory gap (quantitative foundations vs AI-core) by
+  profession, governance, and region
 - Friedman test with pairwise Wilcoxon (Holm-Bonferroni) on domain credits
-- Kruskal-Wallis (profession), Mann-Whitney (governance, region)
-- Fisher exact odds ratios with exact conditional confidence intervals
-  (governance and region vs Advanced stage)
-- BCa bootstrap confidence intervals (domain adoption; regional mean differences)
-- Post-hoc power / minimum-detectable-effect analysis and an empirical
-  justification for the Advanced credit threshold
-- Advanced-threshold sensitivity sweep and a five-strategy classification
-  sensitivity analysis
-- Exploratory ordinal logistic regression of curriculum maturity
+- Kruskal-Wallis on total credits across professions
+- Fisher exact odds ratios with exact conditional confidence intervals for
+  Advanced stage by governance and by region
+- BCa bootstrap confidence intervals for domain adoption (College-stratified)
+- Threshold sweep for the Advanced credit cutoff (5 to 12 credits)
+- Five-strategy classification sensitivity analysis (consensus, single-domain
+  priority, strict single-domain, rule-based only, LLM-assisted only)
 - Advanced-vs-Foundational-Only extreme-group profiling
-- Stratified mandatory gap (by college, governance, and region)
-- Figures 1, 2, and 3, plus a per-profession supplementary figure
+- Ordinal logistic regression of the 4-stage maturity outcome on profession,
+  governance, region, and admission quota
+- Three main figures plus a per-profession supplementary figure
 
-## Five domains
+## Five content domains
 
-- **D1** Quantitative Foundations
+- **D1** Quantitative Foundations (mathematics, statistics, programming,
+  computational thinking)
 - **D2** AI and Machine Learning
 - **D3** Data Science
 - **D4** Health Informatics
 - **D5** Clinical AI Application
 
-AI-core domains are D2, D3, and D5. A school is classified **Advanced** if it
-offers a foundational (D1) course, at least two AI-core domains, and at least 8
-total AI/DS credits.
+D2, D3, and D5 together constitute the AI-core domains.
+
+## Maturity stages (Option B Advanced)
+
+A school's maturity is assigned in four ordered levels:
+
+- **None**: no AI/DS course offered
+- **Foundational-Only**: at least one course, but no AI-core domain
+- **Intermediate**: at least one AI-core domain
+- **Advanced**: D1 offered, at least two AI-core domains, at least eight total
+  AI/DS credits, and at least one mandatory AI-core course
+
+The Advanced definition (Option B) adds the mandatory AI-core requirement on
+top of the breadth (D1 + ≥2 AI-core domains) and depth (≥8 credits)
+thresholds. This captures schools that have institutionalized AI/DS content
+rather than offered it only as a peripheral elective.
 
 ## Repository layout
 
@@ -56,33 +79,24 @@ total AI/DS credits.
 release_github/
 ├── README.md
 ├── requirements.txt
-├── LICENSE                       GNU General Public License v3.0 (GPL-3.0)
-├── run_all.py                    End-to-end orchestrator
+├── LICENSE                  GNU General Public License v3.0 (GPL-3.0)
+├── run_all.py               End-to-end orchestrator
 └── src/
-    ├── config.py                 Paths, mappings, domain definitions, palettes
-    ├── data_loader.py            Raw-data preprocessing, feature matrix, maturity
-    ├── classification_loader.py  Merge frozen classification with raw curriculum
-    ├── analysis.py               Core descriptive + inferential statistics
-    ├── descriptive_inferential.py  Stage 1 entry point (+ classification sensitivity)
-    ├── domain_credit_tests.py    Friedman + pairwise Wilcoxon on domain credits
-    ├── region_analysis.py        Capital vs Non-Capital area comparison
-    ├── school_type_axes.py       Four-axis school-type decomposition
-    ├── threshold_sweep.py        Advanced-threshold sensitivity sweep
-    ├── gap_stratified.py         Stratified mandatory gap
-    ├── power_analysis.py         Post-hoc power / MDE + threshold justification
-    ├── fisher_ci.py              Governance Fisher OR with exact conditional CI
-    ├── bootstrap_ci.py           BCa bootstrap CIs for headline effect sizes
-    ├── ordinal_logistic.py       Exploratory ordinal logistic regression
-    ├── advanced_vs_foundational.py  Advanced vs Foundational-Only profiling
-    ├── sensitivity_full.py       Full five-strategy classification sensitivity
-    └── figures.py                Figures 1/2/3 + per-profession supplementary
+    ├── analysis.py                Primary analysis (per-school features,
+    │                              4-stage maturity, sensitivity, threshold
+    │                              sweep, bootstrap, gap analysis,
+    │                              stratified mandatory gap)
+    ├── supplementary_analysis.py  Advanced vs Foundational profiling and
+    │                              ordinal logistic regression
+    └── figures.py                 Figures 1, 2, 3 + per-profession
+                                   supplementary figure
 ```
 
 ## Input data
 
-**Input data are NOT included in this repository.** They are available from the
-corresponding author on reasonable request. The dataset was assembled from
-publicly available institutional materials (course catalogues, academic
+**Input data are NOT included in this repository.** They are available from
+the corresponding author on reasonable request. The dataset was assembled
+from publicly available institutional materials (course catalogues, academic
 schedules, and curriculum guides) collected between April and June 2025, and
 contains no personal or sensitive information.
 
@@ -91,20 +105,18 @@ To run the pipeline, place the input files under `data/` using this layout:
 ```text
 data/
 ├── raw/
-│   ├── 교육과정현황조사 최종본.xlsx    Course-level curriculum survey
-│   └── 대학정보.xlsx                    Institutional metadata (region, quota, governance)
+│   ├── 교육과정현황조사 최종본.xlsx   Course-level curriculum survey
+│   └── 대학정보.xlsx                   Institutional metadata
 └── classification/
-    ├── consensus.csv                    Primary adjudicated consensus classification
-    ├── final_adjudicated_classification.csv  Final adjudicated classification
-    ├── m1_rules.csv                     Rule-based keyword classification (sensitivity)
-    └── m2_llm.csv                       LLM-assistant classification (sensitivity)
+    ├── final_adjudicated_classification.csv  Primary frozen classification
+    ├── m1_rules.csv                          Rule-based keyword classification
+    └── m2_llm.csv                            LLM-assisted classification
 ```
 
-The classification files contain per-course domain labels (`D1`–`D5`). They are
-treated as a frozen input: the classification is not regenerated by this code.
-The adjudicated consensus and the final adjudicated classification carry the
-same per-course domain assignments; both are listed because different pipeline
-stages read one or the other.
+The classification files contain per-course domain labels (`D1`–`D5`). They
+are treated as a frozen input: the classification is not regenerated by this
+code. The `m1_rules.csv` and `m2_llm.csv` files are used only by the
+five-strategy classification sensitivity analysis.
 
 ## Setup
 
@@ -122,35 +134,44 @@ After placing the input data under `data/`:
 python run_all.py
 ```
 
-The orchestrator runs all stages in dependency order. Some stages read CSVs
-written by earlier stages (e.g. the figures read derived statistics, and the
-Fisher CI stage reads the governance contingency table), so run them through
-`run_all.py` rather than individually unless the prerequisites already exist.
+The orchestrator runs the three stages in dependency order (primary analysis
+writes the per-school feature table that the supplementary analysis and the
+figures both read).
 
-Individual stages can also be run directly, for example:
+Individual stages can also be run directly:
 
 ```bash
-python src/descriptive_inferential.py
+python src/analysis.py
+python src/supplementary_analysis.py
 python src/figures.py
 ```
 
 ## Outputs
 
-Running the pipeline creates (and is the sole source of) two directories:
+Running the pipeline creates and populates two directories:
 
 ```text
-results/
-├── statistics/    All statistical CSV/JSON outputs reported in the manuscript
-└── sensitivity/   Classification-strategy sensitivity summary + bootstrap CIs
+results/statistics/
+├── per_school.csv                     63-school feature table
+├── summary.json                        Headline numbers
+├── gap_analysis.csv                    Per-school gap to next stage
+├── mandatory_gap_stratified.csv        D1 vs AI-core mandatory by stratum
+├── bootstrap_adoption_bca.csv          BCa CIs for domain adoption
+├── threshold_sweep.csv                 Advanced credit threshold sweep
+├── sensitivity.csv                     5-strategy classification sensitivity
+├── adv_vs_foundational.csv             Extreme-group profiling
+├── ordinal_logistic.csv                Ordinal logistic coefficients
+└── ordinal_logistic_summary.json       Fit statistics
+
 figures/
 ├── Figure_1.{png,pdf}
 ├── Figure_2.{png,pdf}
 ├── Figure_3.{png,pdf}
-└── Supplementary_PerProfession.{png,pdf}
+└── Supplementary_Note_5_PerProfession.{png,pdf}
 ```
 
-All numerical analyses use a fixed random seed (42), so re-running reproduces the
-reported numbers and figures exactly.
+All numerical analyses use a fixed random seed (42), so re-running reproduces
+the reported numbers and figures exactly.
 
 ## Citation
 
@@ -159,5 +180,5 @@ reported numbers and figures exactly.
 ## License
 
 Code is released under the GNU General Public License v3.0 (GPL-3.0); see
-`LICENSE`. The curriculum dataset and derived data products are not part of this
-repository and are governed separately.
+`LICENSE`. The curriculum dataset and derived data products are not part of
+this repository and are governed separately.

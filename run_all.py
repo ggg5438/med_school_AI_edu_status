@@ -1,4 +1,3 @@
-# End-to-end reproduction orchestrator.
 from __future__ import annotations
 
 import subprocess
@@ -6,22 +5,13 @@ import sys
 import time
 from pathlib import Path
 
-SRC_DIR = Path(__file__).resolve().parent / "src"
+ROOT = Path(__file__).resolve().parent
+SRC_DIR = ROOT / "src"
 
 STAGES = [
-    ("descriptive_inferential.py", "Descriptive + inferential statistics"),
-    ("domain_credit_tests.py", "Friedman + pairwise Wilcoxon on domain credits"),
-    ("region_analysis.py", "Capital vs Non-Capital area comparison"),
-    ("school_type_axes.py", "Four-axis school-type decomposition"),
-    ("threshold_sweep.py", "Advanced-threshold sensitivity sweep"),
-    ("gap_stratified.py", "Stratified mandatory gap"),
-    ("power_analysis.py", "Post-hoc power / MDE + threshold justification"),
-    ("fisher_ci.py", "Governance Fisher OR with exact CI"),
-    ("bootstrap_ci.py", "BCa bootstrap CIs for headline effect sizes"),
-    ("ordinal_logistic.py", "Exploratory ordinal logistic regression"),
-    ("advanced_vs_foundational.py", "Advanced vs Foundational-Only profiling"),
-    ("sensitivity_full.py", "Full classification sensitivity"),
-    ("figures.py", "Figures 1/2/3 + per-profession supplementary"),
+    ("analysis.py", "Primary analysis (Option B Advanced, 4-stage maturity)"),
+    ("supplementary_analysis.py", "Supplementary analysis (Adv vs Foundational, ordinal logistic)"),
+    ("figures.py", "Figures (1, 2, 3) + Supplementary Note 5"),
 ]
 
 
@@ -36,14 +26,19 @@ def run(script: str) -> None:
 
 def main() -> int:
     t0 = time.time()
-    print("=" * 74)
+    print("=" * 70)
     print("REPRODUCTION PIPELINE")
-    print("=" * 74)
+    print("=" * 70)
+
+    (ROOT / "results" / "statistics").mkdir(parents=True, exist_ok=True)
+    (ROOT / "figures").mkdir(parents=True, exist_ok=True)
+
     for script, label in STAGES:
         print(f"\n>>> {label}")
         run(script)
+
     elapsed = time.time() - t0
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 70}")
     print(f"Pipeline complete in {elapsed:.1f}s")
     return 0
 
