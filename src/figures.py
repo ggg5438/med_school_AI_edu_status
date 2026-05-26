@@ -671,17 +671,17 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
                 borderpad=0.2)
     _panel_label(ax_d, "d", x=-0.22)
 
-    # (e) Transition resources
-    # Foundational-Only → Intermediate: per gap analysis, +1 AI-core domain.
-    # Credits gap is 0 in the formal stage definition, but in practice adopting
-    # a new AI-core course costs credits. We display the median AI-core course
-    # credit in the analyzed cohort (D2|D3|D5, n=54, median=2.0) as the
-    # indicative additional-credit resource.
-    AICORE_COURSE_CREDIT_MEDIAN = 2.0
+    # (e) Transition resources — both rows report MEAN additional credits for
+    # label consistency. Foundational-Only → Intermediate uses the mean credit
+    # of an AI-core course in the analyzed cohort (D2|D3|D5, n=54, mean=2.14)
+    # as the indicative additional-credit resource for adopting one new
+    # AI-core course; Intermediate → Advanced uses the empirical mean gap to
+    # 8 credits across Intermediate schools.
+    AICORE_COURSE_CREDIT_MEAN = 2.14
     gap = summary["gap_to_next_stage"]
     transitions_stats = [
         {"label": "Foundational\n→ Intermediate",
-         "cr_mean": AICORE_COURSE_CREDIT_MEDIAN,
+         "cr_mean": AICORE_COURSE_CREDIT_MEAN,
          "dm_mean": gap["Foundational-Only"]["mean_need_aicore_domains"],
          "mand_mean": gap["Foundational-Only"]["mean_need_mandatory_aicore"],
          "kind": "domain step"},
