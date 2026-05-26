@@ -560,12 +560,16 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
                  s=sizes, c=colors_b, edgecolor="black", linewidth=0.5,
                  alpha=0.92, zorder=3)
 
+    # Label offsets tuned to keep crowded mid-left domains (AI/ML, DS, ClinAI)
+    # readable: their markers cluster near (x≈27-33, y≈45-48). Three labels are
+    # pushed in three different directions (right, down, up-left) to avoid
+    # overlap. Quant and HI are isolated and keep their original positions.
     label_offsets = {
-        "Quantitative Foundations": (-8.0, 0.0,  "right", "center"),
-        "AI & Machine Learning":    ( 3.0, 0.0,  "left",  "center"),
-        "Data Science":             ( 0.0, -4.5, "center", "top"),
-        "Health Informatics":       ( 4.0, 0.0,  "left",  "center"),
-        "Clinical AI Application":  ( -1.0, 3.2, "right", "bottom"),
+        "Quantitative Foundations": (-8.0, 0.0,  "right",  "center"),
+        "AI & Machine Learning":    ( 4.0, 0.0,  "left",   "center"),
+        "Data Science":             ( 0.0, -5.5, "center", "top"),
+        "Health Informatics":       ( 4.0, 0.0,  "left",   "center"),
+        "Clinical AI Application":  (-5.5, 5.0,  "right",  "bottom"),
     }
     for _, row in merge_b.iterrows():
         dx, dy, ha, va = label_offsets[row["Domain"]]
