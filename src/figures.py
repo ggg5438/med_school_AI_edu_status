@@ -1,3 +1,42 @@
+# -*- coding: utf-8 -*-
+"""
+Main figures (1, 2, 3, 4) + Supplementary Note 1.
+
+  Figure 1  Quantitative-foundation-centric curriculum: domain total credits,
+            credits per school by profession, domain adoption heatmap, and
+            year x domain course placement.
+  Figure 2  AI-specific institutionalization (2 panels): mandatory share by
+            domain and an institutionalization map (adoption x mandatory share,
+            sized by credit share).
+  Figure 3  Clinical vs research career-track distribution (3 panels): per-school
+            year-weighted track credits, mean crude credits by profession x
+            track (95% bootstrap CI), and track co-occurrence counts.
+  Figure 4  Institutional-characteristic axes (2-panel forest): multivariable
+            OLS beta (95% CI) for per-school total credits, and multivariable
+            logistic OR (95% CI) for holding each career track. Both significant
+            and non-significant terms are drawn identically. Visualization only:
+            every value is read straight from the statistics CSVs.
+  Supp Note 1  Per-profession year x domain course placement (6 heatmaps).
+
+Inputs (results/statistics/ + data/):
+  results/statistics/per_school.csv
+  results/statistics/summary.json
+  results/statistics/track_metrics.csv
+  results/statistics/track_summary.json
+  results/statistics/track_presence_logistic.csv
+  results/statistics/continuous_ols_total_credits.csv
+  data/classification/final_adjudicated_classification.csv
+  data/raw/교육과정현황조사 최종본.xlsx
+
+Output:
+  figures/Figure_1.{png,pdf}
+  figures/Figure_2.{png,pdf}
+  figures/Figure_3.{png,pdf}
+  figures/Figure_4.{png,pdf}
+  figures/Supplementary_Note_1_PerProfession.{png,pdf}
+
+Style: publication style, Arial/sans-serif, colorblind-safe.
+"""
 from __future__ import annotations
 
 import json
@@ -6,9 +45,9 @@ import sys
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import matplotlib as mpl
@@ -18,18 +57,23 @@ from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 
-# Paths
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+PROJECT_ROOT = _SCRIPTS_DIR.parent
 DATA_CLASSIF = PROJECT_ROOT / "data" / "classification" / "final_adjudicated_classification.csv"
 STATS_DIR = PROJECT_ROOT / "results" / "statistics"
-UNI_META_FILE = PROJECT_ROOT / "data" / "raw" / "대학정보.xlsx"
 RAW_CURR_FILE = PROJECT_ROOT / "data" / "raw" / "교육과정현황조사 최종본.xlsx"
 
 OUT_DIR = PROJECT_ROOT / "figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# ============================================================
 # Style
+# ============================================================
+
 def setup_style():
     mpl.rcdefaults()
     mpl.rcParams.update({
@@ -60,7 +104,7 @@ def setup_style():
     })
 
 
-# Page sizes
+# Page sizes (mm -> inches)
 SINGLE_COL = 89 / 25.4
 ONE_HALF_COL = 136 / 25.4
 DOUBLE_COL = 183 / 25.4
@@ -80,7 +124,10 @@ def _save(fig, stem: str) -> None:
     plt.close(fig)
 
 
+# ============================================================
 # Constants
+# ============================================================
+
 COLLEGE_MAP = {"의대": "Medicine", "치대": "Dentistry", "한의대": "Korean Medicine"}
 COLLEGE_ORDER = ["Medicine", "Dentistry", "Korean Medicine"]
 COLLEGE_SHORT = {"Medicine": "Medical", "Dentistry": "Dental", "Korean Medicine": "Korean medicine"}
@@ -130,35 +177,86 @@ COLLEGE_COLORS = {
     "Korean Medicine": "#6ACC64",
 }
 
-# 4-stage maturity (None at bottom)
-MATURITY_ORDER = ["None", "Foundational-Only", "Intermediate", "Advanced"]
-MATURITY_LABELS = {
-    "None":              "None",
-    "Foundational-Only": "Foundational",
-    "Intermediate":      "Intermediate",
-    "Advanced":          "Advanced",
+# Track colour mapping (stable across Figure 3 and the supplementary figure)
+TRACK_COLORS = {
+    "clinical": "#1f77b4",
+    "research": "#d62728",
+    "baseline": "#7f7f7f",
 }
-MATURITY_COLORS = {
-    "None":              "#CCCCCC",
-    "Foundational-Only": "#D65F5F",
-    "Intermediate":      "#EE854A",
-    "Advanced":          "#4878D0",
+TRACK_LABELS = {
+    "clinical": "Clinical (D4+D5)",
+    "research": "Research (D2+D3)",
+    "baseline": "Baseline (D1)",
 }
 
 GOV_COLORS = {"Public": "#4878D0", "Private": "#D4D4D4"}
 GRID_COLOR = "#D9D9D9"
 
+# ------------------------------------------------------------------
+# Uniform thin grey edge applied to EVERY filled mark (bars, stacked-bar
+# segments, heatmap cells, scatter / bubble markers) across all panels and
+# all figures, per the visual-consistency rule. A single constant keeps
+# the stroke width identical for every graphic type (heatmaps included), so
+# no panel looks edged while another looks borderless.
+# ------------------------------------------------------------------
+EDGE_LW = 0.5          # points; identical for bars, cells and markers
+EDGE_COLOR = "#999999"  # mid grey, legible on white without overpowering fills
 
+
+def _draw_cell_grid(ax, nrows: int, ncols: int) -> None:
+    """Overlay a uniform thin grey border on every cell of an imshow heatmap.
+
+    imshow places cell centres at integer (col, row); each cell spans
+    [j-0.5, j+0.5] x [i-0.5, i+0.5]. We stroke a facecolor='none' rectangle
+    per cell so the grid is identical for filled, masked and zero cells.
+    """
+    for i in range(nrows):
+        for j in range(ncols):
+            ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                                       facecolor="none",
+                                       edgecolor=EDGE_COLOR,
+                                       linewidth=EDGE_LW, zorder=5))
+
+
+def _bootstrap_ci_mean(vals, rng, n_boot: int = 10000, ci: float = 95.0):
+    """Percentile bootstrap CI for the mean of a non-negative sample.
+
+    Because every resample is drawn from non-negative observations, every
+    bootstrap mean is >= 0, so the lower bound is bounded below by 0 by
+    construction (no negative lower limit can arise).
+    """
+    vals = np.asarray(vals, dtype=float)
+    vals = vals[~np.isnan(vals)]
+    n = len(vals)
+    if n == 0:
+        return np.nan, np.nan, np.nan
+    mean = float(vals.mean())
+    if n < 2:
+        return mean, mean, mean
+    boot = rng.choice(vals, size=(n_boot, n), replace=True).mean(axis=1)
+    lo = float(np.percentile(boot, (100.0 - ci) / 2.0))
+    hi = float(np.percentile(boot, 100.0 - (100.0 - ci) / 2.0))
+    return mean, lo, hi
+
+
+# ============================================================
 # Data loading
+# ============================================================
+
 def load_classification() -> pd.DataFrame:
+    """Course-level data (179 courses) from the v7 adjudicated classification."""
     df = pd.read_csv(DATA_CLASSIF)
     df["College_EN"] = df["College"].map(COLLEGE_MAP)
     df["Is_Mandatory_Binary"] = (df["Is_Mandatory"] == "필수").astype(int)
     return df
 
 
-def load_school() -> pd.DataFrame:
+def load_school_v11() -> pd.DataFrame:
+    """School-level data (n=63) loaded directly from per_school.csv."""
+    # keep_default_na=False keeps string columns literal; numeric columns are
+    # coerced explicitly below.
     df = pd.read_csv(STATS_DIR / "per_school.csv", keep_default_na=False)
+    # Restore numeric columns
     for c in ["n_courses", "total_credits",
               "D1_n", "D1_credits", "has_D1",
               "D2_n", "D2_credits", "has_D2",
@@ -168,24 +266,47 @@ def load_school() -> pd.DataFrame:
               "Admission_Quota", "Capital_Area",
               "aicore_count", "has_mandatory_aicore"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
+    # Governance: 국립/공립 -> Public, 사립 -> Private
     pp_map = {"국립": "Public", "공립": "Public", "사립": "Private"}
     df["Governance"] = df["Public_Private"].map(pp_map)
+    # Region label (Capital vs non-Capital)
     df["Region_Binary"] = df["Capital_Area"].map({1: "Capital area",
                                                   0: "Non-Capital area"})
+    # AI-core count and breadth (for Fig 2c)
     df["AI_Core_Count"] = df[["has_D2", "has_D3", "has_D5"]].sum(axis=1)
     df["Breadth"] = df[["has_D1", "has_D2", "has_D3", "has_D4", "has_D5"]].sum(axis=1)
+    # Total credits column for compatibility with Fig 1b
     df = df.rename(columns={"total_credits": "Total_Credits",
-                            "stage": "Maturity",
                             "College": "College_EN"})
     return df
 
 
-def load_summary() -> dict:
+def load_summary_v11() -> dict:
     with open(STATS_DIR / "summary.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-# Course-level derived statistics
+def load_track_metrics_v11() -> pd.DataFrame:
+    return pd.read_csv(STATS_DIR / "track_metrics.csv")
+
+
+def load_track_summary_v11() -> dict:
+    with open(STATS_DIR / "track_summary.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_track_presence_logistic_v11() -> pd.DataFrame:
+    return pd.read_csv(STATS_DIR / "track_presence_logistic.csv")
+
+
+def load_continuous_ols_total_credits_v11() -> pd.DataFrame:
+    return pd.read_csv(STATS_DIR / "continuous_ols_total_credits.csv")
+
+
+# ============================================================
+# Course-level derived stats (recomputed from 179 courses)
+# ============================================================
+
 def compute_domain_distribution(course_df: pd.DataFrame,
                                 school_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
@@ -222,7 +343,10 @@ def compute_mandatory_by_domain(course_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("Domain").loc[DOMAIN_ORDER].reset_index()
 
 
-# Year-stage helpers
+# ============================================================
+# Year stage helpers (unchanged from v10)
+# ============================================================
+
 def _load_year_merged(course_df: pd.DataFrame) -> pd.DataFrame:
     raw = pd.read_excel(RAW_CURR_FILE)
     raw.columns = [
@@ -278,7 +402,15 @@ def _load_year_merged(course_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _course_level_stage_share_resolved(course_df: pd.DataFrame,
-                                       college_filter: str | None = None) -> pd.DataFrame:
+                                       college_filter: str | None = None):
+    """Return (pct_df, counts_df).
+
+    counts_df holds the raw per-(domain, stage) course counts that feed each
+    cell percentage; the per-row denominator is counts_df.sum(axis=1) (the
+    number of grade-resolved courses in that domain). Returning the source
+    counts lets cell annotations show "%(numerator/denominator)" without any
+    new counting logic.
+    """
     merged = _load_year_merged(course_df)
     merged = merged[merged["Year_Stage"].notna()].copy()
     if college_filter is not None:
@@ -300,11 +432,21 @@ def _course_level_stage_share_resolved(course_df: pd.DataFrame,
         if row_total > 0:
             pct[i, :] = 100.0 * counts[i, :] / row_total
 
-    return pd.DataFrame(pct, index=DOMAIN_ORDER, columns=stages)
+    pct_df = pd.DataFrame(pct, index=DOMAIN_ORDER, columns=stages)
+    counts_df = pd.DataFrame(counts.astype(int), index=DOMAIN_ORDER, columns=stages)
+    return pct_df, counts_df
 
 
 def _course_level_stage_share_full(course_df: pd.DataFrame,
-                                   college_filter: str | None = None) -> pd.DataFrame:
+                                   college_filter: str | None = None):
+    """Return (pct_df, counts_df, totals_series).
+
+    The cell denominator here is the per-domain TOTAL course count
+    (totals_series), NOT the row sum: a course flagged as both Pre_Medical and
+    Medical is counted in both the Pre and Med cells, so a row can sum just
+    above 100%. counts_df holds the raw per-cell numerators. Returning both
+    lets annotations show "%(numerator/domain total)" with no new counting.
+    """
     merged = _load_year_merged(course_df)
     if college_filter is not None:
         merged = merged[merged["College_EN"] == college_filter].copy()
@@ -327,26 +469,36 @@ def _course_level_stage_share_full(course_df: pd.DataFrame,
         if domain_totals[i] > 0:
             pct[i, :] = 100.0 * counts[i, :] / domain_totals[i]
 
-    return pd.DataFrame(pct, index=DOMAIN_ORDER, columns=stages)
+    pct_df = pd.DataFrame(pct, index=DOMAIN_ORDER, columns=stages)
+    counts_df = pd.DataFrame(counts.astype(int), index=DOMAIN_ORDER, columns=stages)
+    totals_series = pd.Series(domain_totals.astype(int), index=DOMAIN_ORDER)
+    return pct_df, counts_df, totals_series
 
 
-# Figure 1
+# ============================================================
+# Figure 1 (unchanged in structure from v10; only data path differs)
+# ============================================================
+
 def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
-    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 1.12))
+    """5 panels: (a) domain total credits, (b) credits per school by college,
+    (c) adoption rate heatmap, (d) grade-resolved year × domain heatmap,
+    (e) stage-collapsed full-sample heatmap.
+    """
+    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 1.00))
     gs = fig.add_gridspec(
-        3, 6, hspace=0.62, wspace=1.30,
+        3, 6, hspace=0.30, wspace=1.30,
         width_ratios=[1, 1, 1, 1, 1, 1],
         height_ratios=[1.0, 1.05, 1.05],
     )
 
-    # (a) Domain total credits
+    # ---------------- (a) Domain total credits ----------------
     ax_a = fig.add_subplot(gs[0, :3])
     domain_dist = compute_domain_distribution(course_df, school_df)
 
     y_pos = np.arange(len(domain_dist))[::-1]
     colors = [DOMAIN_COLORS[d] for d in domain_dist["Domain"]]
     ax_a.barh(y_pos, domain_dist["Total_Credits"], color=colors, height=0.62,
-              edgecolor="white", linewidth=0.5)
+              edgecolor=EDGE_COLOR, linewidth=EDGE_LW)
     ax_a.set_yticks(y_pos)
     ax_a.set_yticklabels([DOMAIN_SHORT[d] for d in domain_dist["Domain"]],
                           fontsize=5.8, linespacing=0.95)
@@ -357,7 +509,7 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_a.set_xlim(0, domain_dist["Total_Credits"].max() * 1.32)
     _panel_label(ax_a, "a", x=-0.32)
 
-    # (b) Credits per school by college
+    # ---------------- (b) Credits per school by college (box+strip) ----------------
     ax_b = fig.add_subplot(gs[0, 3:])
     rng = np.random.default_rng(42)
     for i, college in enumerate(COLLEGE_ORDER):
@@ -367,13 +519,13 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                           medianprops=dict(color="black", linewidth=0.9),
                           whiskerprops=dict(linewidth=0.5),
                           capprops=dict(linewidth=0.5),
-                          boxprops=dict(linewidth=0.5))
+                          boxprops=dict(linewidth=EDGE_LW, edgecolor=EDGE_COLOR))
         bp["boxes"][0].set_facecolor(COLLEGE_COLORS[college])
         bp["boxes"][0].set_alpha(0.35)
         jitter = rng.uniform(-0.13, 0.13, len(vals))
         ax_b.scatter(np.full(len(vals), i) + jitter, vals,
                      c=COLLEGE_COLORS[college], s=10, alpha=0.75,
-                     edgecolors="white", linewidths=0.3, zorder=4)
+                     edgecolors=EDGE_COLOR, linewidths=EDGE_LW, zorder=4)
 
     ax_b.set_xticks(range(len(COLLEGE_ORDER)))
     n_per_college = {c: int((school_df["College_EN"] == c).sum()) for c in COLLEGE_ORDER}
@@ -384,7 +536,7 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_b.set_ylim(0, school_df["Total_Credits"].max() * 1.18)
     _panel_label(ax_b, "b", x=-0.18)
 
-    # (c) Adoption rate heatmap (domain x college)
+    # ---------------- (c) Adoption rate heatmap (domain × college) ----------------
     ax_c = fig.add_subplot(gs[1, :3])
     rates = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
     counts = np.zeros((len(DOMAIN_ORDER), len(COLLEGE_ORDER)))
@@ -400,9 +552,12 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     colors_list = [(1, 1, 1)] + [base(t) for t in np.linspace(0.18, 0.95, 254)]
     cmap_blue = LinearSegmentedColormap.from_list("white_blues", colors_list, N=256)
 
-    im = ax_c.imshow(rates, cmap=cmap_blue, vmin=0, vmax=100, aspect="auto")
+    im_c = ax_c.imshow(rates, cmap=cmap_blue, vmin=0, vmax=100, aspect="equal")
     ax_c.set_xticks(range(len(COLLEGE_ORDER)))
-    ax_c.set_xticklabels([COLLEGE_SHORT[c] for c in COLLEGE_ORDER], fontsize=6.5)
+    # Square cells make this 3-column panel narrow; long college names (esp.
+    # "Korean medicine") overlap when horizontal, so rotate the x-labels.
+    ax_c.set_xticklabels([COLLEGE_SHORT[c] for c in COLLEGE_ORDER], fontsize=6.5,
+                         rotation=30, ha="right", rotation_mode="anchor")
     ax_c.set_yticks(range(len(DOMAIN_ORDER)))
     ax_c.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
                          fontsize=5.8, linespacing=0.95)
@@ -410,19 +565,19 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
         for j in range(rates.shape[1]):
             tcol = "white" if rates[i, j] >= 55 else "black"
             ax_c.text(j, i, f"{rates[i, j]:.1f}%\n({int(counts[i, j])}/{n_per_college[COLLEGE_ORDER[j]]})",
-                      ha="center", va="center", fontsize=5.0, color=tcol,
+                      ha="center", va="center", fontsize=5.5, color=tcol,
                       linespacing=0.95)
+    _draw_cell_grid(ax_c, rates.shape[0], rates.shape[1])
     for s in ax_c.spines.values():
         s.set_visible(False)
-    cbar = fig.colorbar(im, ax=ax_c, shrink=0.55, aspect=12, pad=0.04)
-    cbar.ax.tick_params(labelsize=5.5, width=0.4)
-    cbar.outline.set_linewidth(0.4)
-    cbar.set_label("Schools offering (%)", fontsize=6)
+    # Colorbar for panel c is created after the canvas draw (below), once the
+    # aspect='equal' square image box is known, so it hugs the image instead of
+    # the wide slot edge (which would collide with panel d's y-labels).
     _panel_label(ax_c, "c", x=-0.32)
 
-    # (d) Grade-resolved year x domain heatmap
+    # ---------------- (d) Grade-resolved year × domain heatmap (6 cols) ----------------
     ax_d = fig.add_subplot(gs[1, 3:])
-    stage_share_d = _course_level_stage_share_resolved(course_df)
+    stage_share_d, counts_d = _course_level_stage_share_resolved(course_df)
 
     stage_labels = {
         "Pre-1": "Pre\n1", "Pre-2": "Pre\n2",
@@ -432,13 +587,15 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     cols_d = list(stage_share_d.columns)
 
     im2 = ax_d.imshow(stage_share_d.values, cmap=cmap_blue,
-                      vmin=0, vmax=100, aspect="auto")
+                      vmin=0, vmax=100, aspect="equal")
     ax_d.set_xticks(range(len(cols_d)))
     ax_d.set_xticklabels([stage_labels[c] for c in cols_d], fontsize=5.6,
                          linespacing=0.95, rotation=0)
     ax_d.set_yticks(range(len(DOMAIN_ORDER)))
     ax_d.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
                          fontsize=5.8, linespacing=0.95)
+    # Per-row denominator = grade-resolved courses in that domain (81/25/30/17/21).
+    den_d = counts_d.sum(axis=1)
     for i in range(stage_share_d.shape[0]):
         for j in range(stage_share_d.shape[1]):
             v = stage_share_d.iloc[i, j]
@@ -448,8 +605,12 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                                               linewidth=0, zorder=2))
                 continue
             tcol = "white" if v >= 55 else "black"
-            ax_d.text(j, i, f"{v:.0f}", ha="center", va="center",
-                      fontsize=5.6, color=tcol, zorder=3)
+            # Match panel (c): ratio(%) over (numerator/denominator), two lines.
+            ax_d.text(j, i,
+                      f"{v:.1f}%\n({int(counts_d.iloc[i, j])}/{int(den_d.iloc[i])})",
+                      ha="center", va="center", fontsize=5.5, color=tcol,
+                      linespacing=0.95, zorder=3)
+    _draw_cell_grid(ax_d, stage_share_d.shape[0], stage_share_d.shape[1])
     for s in ax_d.spines.values():
         s.set_visible(False)
     cbar2 = fig.colorbar(im2, ax=ax_d, shrink=0.55, aspect=12, pad=0.04)
@@ -459,13 +620,30 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     ax_d.set_xlabel("Curriculum stage (grade-resolved subset)")
     _panel_label(ax_d, "d", x=-0.18)
 
-    # (e) Stage-collapsed full-sample heatmap
+    # ---------------- (e) Stage-collapsed full-sample heatmap ----------------
     fig.canvas.draw()
+    figW, figH = fig.get_size_inches()
+
+    # Panel c colorbar, now that the square image box is known: hug the image.
+    pos_c = ax_c.get_position()
+    cb_h_c = pos_c.height * 0.55
+    cbax_c = fig.add_axes([pos_c.x1 + 0.010,
+                           pos_c.y0 + (pos_c.height - cb_h_c) / 2.0,
+                           0.011, cb_h_c])
+    cbar_c = fig.colorbar(im_c, cax=cbax_c)
+    cbar_c.ax.tick_params(labelsize=5.5, width=0.4)
+    cbar_c.outline.set_linewidth(0.4)
+    cbar_c.set_label("Schools offering (%)", fontsize=6)
+
     pos_d = ax_d.get_position()
-    cell_w_d = pos_d.width / 6.0
-    cell_h_d = pos_d.height / len(DOMAIN_ORDER)
-    e_width = 2 * cell_w_d
-    e_height = 5 * cell_h_d
+    # Panel d is now aspect='equal', so its drawn image is square-celled and
+    # centred inside its allocated box. Derive the TRUE square-cell side (in.)
+    # from the limiting dimension, then size panel e so its 2x5 cells are
+    # square AND the same physical size as panel d's cells.
+    s_cell = min(pos_d.width * figW / 6.0,
+                 pos_d.height * figH / len(DOMAIN_ORDER))
+    e_width = (2 * s_cell) / figW
+    e_height = (len(DOMAIN_ORDER) * s_cell) / figH
     bbox_row2 = gs[2, 0].get_position(fig)
     e_bottom = bbox_row2.y0 + (bbox_row2.height - e_height) * 0.5
     e_left = 0.5 - e_width / 2.0
@@ -476,18 +654,21 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     cb_left = e_left + e_width + cb_pad
     cb_bottom = e_bottom + (e_height - cb_h) / 2
     cax_e = fig.add_axes([cb_left, cb_bottom, cb_w, cb_h])
-    stage_share_e = _course_level_stage_share_full(course_df)
+    stage_share_e, counts_e, totals_e = _course_level_stage_share_full(course_df)
 
     stage_labels_e = {"Pre": "Premed", "Med": "Med"}
     cols_e = list(stage_share_e.columns)
 
     im3 = ax_e.imshow(stage_share_e.values, cmap=cmap_blue,
-                      vmin=0, vmax=100, aspect="auto")
+                      vmin=0, vmax=100, aspect="equal")
     ax_e.set_xticks(range(len(cols_e)))
     ax_e.set_xticklabels([stage_labels_e[c] for c in cols_e], fontsize=5.6)
     ax_e.set_yticks(range(len(DOMAIN_ORDER)))
     ax_e.set_yticklabels([DOMAIN_SHORT[d] for d in DOMAIN_ORDER],
                          fontsize=5.8, linespacing=0.95)
+    # Per-row denominator = total courses in that domain (106/33/36/22/23).
+    # NOT the row sum: a course tagged both premed and med is counted in both
+    # cells, so the Health-informatics row sums just above 100%.
     for i in range(stage_share_e.shape[0]):
         for j in range(stage_share_e.shape[1]):
             v = stage_share_e.iloc[i, j]
@@ -497,8 +678,12 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
                                               linewidth=0, zorder=2))
                 continue
             tcol = "white" if v >= 55 else "black"
-            ax_e.text(j, i, f"{v:.0f}", ha="center", va="center",
-                      fontsize=5.6, color=tcol, zorder=3)
+            # Match panel (c): ratio(%) over (numerator/denominator), two lines.
+            ax_e.text(j, i,
+                      f"{v:.1f}%\n({int(counts_e.iloc[i, j])}/{int(totals_e.iloc[i])})",
+                      ha="center", va="center", fontsize=5.5, color=tcol,
+                      linespacing=0.95, zorder=3)
+    _draw_cell_grid(ax_e, stage_share_e.shape[0], stage_share_e.shape[1])
     for s in ax_e.spines.values():
         s.set_visible(False)
     cbar3 = fig.colorbar(im3, cax=cax_e)
@@ -511,27 +696,35 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
     _save(fig, "Figure_1")
 
 
-# Figure 2
+# ============================================================
+# Figure 2 — mandatory share + institutionalization map (2 panels)
+# ============================================================
+
 def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
             summary: dict) -> None:
-    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 0.70))
-    gs = fig.add_gridspec(
-        2, 6,
-        hspace=0.62, wspace=1.30,
-        height_ratios=[1.0, 1.0],
-    )
-    ax_a = fig.add_subplot(gs[0, :3])
-    ax_b = fig.add_subplot(gs[0, 3:])
-    ax_c = fig.add_subplot(gs[1, :2])
-    ax_d = fig.add_subplot(gs[1, 2:4])
-    ax_e = fig.add_subplot(gs[1, 4:])
+    """2 panels: (a) mandatory share by domain, (b) institutionalization map.
 
-    # (a) Mandatory share by domain
+    The post-submission revision retired the author-driven 'AI-core' construct,
+    so the former panel (c) — AI-core breadth distribution by profession — is
+    removed. Panels (a) and (b) are unchanged in data and values; the figure is
+    re-laid-out from three columns to two.
+    """
+    # Width set to 1.5-column so two square-ish panels read comfortably; height
+    # follows the single-row content.
+    fig = plt.figure(figsize=(ONE_HALF_COL, ONE_HALF_COL * 0.50))
+    gs = fig.add_gridspec(
+        1, 2,
+        wspace=0.55,
+    )
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+
+    # ---------------- (a) Mandatory share by domain ----------------
     mandatory_df = compute_mandatory_by_domain(course_df)
     y_pos = np.arange(len(mandatory_df))[::-1]
     colors = [DOMAIN_COLORS[d] for d in mandatory_df["Domain"]]
     ax_a.barh(y_pos, mandatory_df["Pct_Mandatory"], color=colors, height=0.62,
-              edgecolor="white", linewidth=0.5)
+              edgecolor=EDGE_COLOR, linewidth=EDGE_LW)
     ax_a.set_yticks(y_pos)
     ax_a.set_yticklabels([DOMAIN_SHORT[d] for d in mandatory_df["Domain"]],
                          fontsize=5.8, linespacing=0.95)
@@ -545,9 +738,9 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
             mandatory_df["N_Courses"])):
         ax_a.text(pct + 2, yi, f"{pct:.1f}% ({int(nm)}/{int(nt)})",
                   va="center", fontsize=5.5, color="#333333")
-    _panel_label(ax_a, "a", x=-0.32)
+    _panel_label(ax_a, "a", x=-0.42)
 
-    # (b) Institutionalization map
+    # ---------------- (b) Institutionalization map ----------------
     domain_dist = compute_domain_distribution(course_df, school_df)
     merge_b = mandatory_df.merge(domain_dist[["Domain", "Pct_Schools", "Pct_Credits"]],
                                  on="Domain")
@@ -557,13 +750,9 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
     sizes = K_AREA * merge_b["Pct_Credits"].to_numpy()
     colors_b = [DOMAIN_COLORS[d] for d in merge_b["Domain"]]
     ax_b.scatter(merge_b["Pct_Schools"], merge_b["Pct_Mandatory"],
-                 s=sizes, c=colors_b, edgecolor="black", linewidth=0.5,
+                 s=sizes, c=colors_b, edgecolor=EDGE_COLOR, linewidth=EDGE_LW,
                  alpha=0.92, zorder=3)
 
-    # Label offsets tuned to keep crowded mid-left domains (AI/ML, DS, ClinAI)
-    # readable: their markers cluster near (x≈27-33, y≈45-48). Three labels are
-    # pushed in three different directions (right, down, up-left) to avoid
-    # overlap. Quant and HI are isolated and keep their original positions.
     label_offsets = {
         "Quantitative Foundations": (-8.0, 0.0,  "right",  "center"),
         "AI & Machine Learning":    ( 4.0, 0.0,  "left",   "center"),
@@ -591,7 +780,7 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
     for p in legend_pcts:
         s = K_AREA * p
         handles_b.append(ax_b.scatter([], [], s=s, c="#BBBBBB",
-                                      edgecolor="black", linewidth=0.4))
+                                      edgecolor=EDGE_COLOR, linewidth=EDGE_LW))
     ax_b.legend(handles_b, [f"{p}%" for p in legend_pcts],
                 title="Share of total\nAI/DS credits",
                 loc="center right", bbox_to_anchor=(0.99, 0.30),
@@ -599,323 +788,358 @@ def figure2(course_df: pd.DataFrame, school_df: pd.DataFrame,
                 fontsize=5.5, title_fontsize=5.5,
                 labelspacing=0.7, borderpad=0.3,
                 handletextpad=1.6)
-    _panel_label(ax_b, "b", x=-0.18)
-
-    # (c) Maturity by college (4-stage stacked bar)
-    maturity_cross = pd.crosstab(school_df["College_EN"], school_df["Maturity"])
-    for m in MATURITY_ORDER:
-        if m not in maturity_cross.columns:
-            maturity_cross[m] = 0
-    maturity_cross = maturity_cross[MATURITY_ORDER]
-    maturity_cross = maturity_cross.reindex(COLLEGE_ORDER)
-
-    n_per_col = maturity_cross.sum(axis=1).values
-    pct = maturity_cross.div(maturity_cross.sum(axis=1), axis=0) * 100
-
-    x = np.arange(len(COLLEGE_ORDER))
-    bottom = np.zeros(len(COLLEGE_ORDER))
-    for m in MATURITY_ORDER:
-        vals = pct[m].values
-        ax_c.bar(x, vals, bottom=bottom, width=0.55,
-                 color=MATURITY_COLORS[m], label=MATURITY_LABELS[m],
-                 edgecolor="white", linewidth=0.5)
-        bottom += vals
-
-    ax_c.set_xticks(x)
-    ax_c.set_xticklabels(
-        [f"{COLLEGE_SHORT[c]}\n(n={int(n_per_col[i])})" for i, c in enumerate(COLLEGE_ORDER)],
-        fontsize=5.8, linespacing=0.95)
-    ax_c.set_ylabel("Schools (%)")
-    ax_c.set_ylim(0, 100)
-    ax_c.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18),
-                ncol=4, frameon=False, fontsize=5.2,
-                handletextpad=0.4, columnspacing=0.7)
-    _panel_label(ax_c, "c", x=-0.30)
-
-    # (d) Breadth-depth scatter
-    rng = np.random.default_rng(42)
-    bd = school_df[["University", "College_EN", "Breadth", "Total_Credits", "Maturity"]].copy()
-    bd["Depth"] = bd["Total_Credits"]
-
-    for m in MATURITY_ORDER:
-        mask = (bd["Maturity"] == m)
-        if mask.sum() == 0:
-            continue
-        xs = bd[mask]["Breadth"].values.astype(float)
-        ys = bd[mask]["Depth"].values.astype(float)
-        xj = xs + rng.uniform(-0.18, 0.18, len(xs))
-        yj = ys + rng.uniform(-0.20, 0.20, len(ys))
-        ax_d.scatter(xj, yj, c=MATURITY_COLORS[m],
-                     marker="o",
-                     s=18, alpha=0.85, edgecolors="white", linewidths=0.4,
-                     zorder=3)
-
-    b_med = bd[bd["Maturity"] != "None"]["Breadth"].median()
-    d_med = bd[bd["Maturity"] != "None"]["Depth"].median()
-    ax_d.axhline(d_med, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
-    ax_d.axvline(b_med, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
-
-    ax_d.set_xlabel("Breadth (n domains)")
-    ax_d.set_ylabel("Total credits")
-    ax_d.set_xlim(-0.5, bd["Breadth"].max() + 0.7)
-    ax_d.set_xticks(range(0, int(bd["Breadth"].max()) + 1))
-
-    handles_maturity = [
-        ax_d.scatter([], [], c=MATURITY_COLORS[m], marker="o",
-                     s=18, edgecolors="white",
-                     linewidths=0.3,
-                     label=MATURITY_LABELS[m])
-        for m in MATURITY_ORDER
-    ]
-    ax_d.legend(handles=handles_maturity, title="Maturity",
-                loc="upper center", bbox_to_anchor=(0.5, -0.22),
-                ncol=4, frameon=False, fontsize=5.2,
-                title_fontsize=5.5,
-                handletextpad=0.3, columnspacing=0.7,
-                borderpad=0.2)
-    _panel_label(ax_d, "d", x=-0.22)
-
-    # (e) Transition resources — both rows report MEAN additional credits for
-    # label consistency. Foundational-Only → Intermediate uses the mean credit
-    # of an AI-core course in the analyzed cohort (D2|D3|D5, n=54, mean=2.14)
-    # as the indicative additional-credit resource for adopting one new
-    # AI-core course; Intermediate → Advanced uses the empirical mean gap to
-    # 8 credits across Intermediate schools.
-    AICORE_COURSE_CREDIT_MEAN = 2.14
-    gap = summary["gap_to_next_stage"]
-    transitions_stats = [
-        {"label": "Foundational\n→ Intermediate",
-         "cr_mean": AICORE_COURSE_CREDIT_MEAN,
-         "dm_mean": gap["Foundational-Only"]["mean_need_aicore_domains"],
-         "mand_mean": gap["Foundational-Only"]["mean_need_mandatory_aicore"],
-         "kind": "domain step"},
-        {"label": "Intermediate\n→ Advanced",
-         "cr_mean": gap["Intermediate"]["mean_need_credits"],
-         "dm_mean": gap["Intermediate"]["mean_need_aicore_domains"],
-         "mand_mean": gap["Intermediate"]["mean_need_mandatory_aicore"],
-         "kind": "credits + mandatory"},
-    ]
-
-    y_pos = np.arange(len(transitions_stats))[::-1]
-    bar_h = 0.34
-    credits_means = [t["cr_mean"] for t in transitions_stats]
-    domains_means = [t["dm_mean"] for t in transitions_stats]
-    mand_means = [t["mand_mean"] for t in transitions_stats]
-    labels = [t["label"] for t in transitions_stats]
-
-    ax_e.barh(y_pos + bar_h / 2, credits_means, bar_h,
-              color="#4878D0", label="Additional credits",
-              edgecolor="white", linewidth=0.5)
-    ax_e.barh(y_pos - bar_h / 2, domains_means, bar_h,
-              color="#EE854A", label="Additional AI-core domains",
-              edgecolor="white", linewidth=0.5)
-    for yi, cr_m, dm_m, mand_m in zip(y_pos, credits_means, domains_means, mand_means):
-        if abs(cr_m - round(cr_m)) < 1e-9:
-            cr_label = f"{cr_m:.0f}"
-        else:
-            cr_label = f"{cr_m:.2f}"
-        if abs(dm_m - round(dm_m)) < 1e-9:
-            dm_label = f"{dm_m:.0f}"
-        else:
-            dm_label = f"{dm_m:.2f}"
-        ax_e.text(cr_m + 0.10, yi + bar_h / 2, cr_label,
-                  va="center", fontsize=5.5)
-        ax_e.text(dm_m + 0.10, yi - bar_h / 2, dm_label,
-                  va="center", fontsize=5.5)
-
-    ax_e.set_yticks(y_pos)
-    ax_e.set_yticklabels(labels, fontsize=5.5, linespacing=0.95)
-    ax_e.set_xlabel("Additional resource (mean)")
-    max_val = max(max(credits_means), max(domains_means))
-    ax_e.set_xlim(0, max_val * 1.30 + 0.4)
-    ax_e.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24),
-                ncol=1, frameon=False, fontsize=5.5,
-                handletextpad=0.4)
-    _panel_label(ax_e, "e", x=-0.32)
+    _panel_label(ax_b, "b", x=-0.22)
 
     _save(fig, "Figure_2")
 
 
-# Figure 3
-def figure3(course_df: pd.DataFrame, school_df: pd.DataFrame,
-            summary: dict) -> None:
-    BASE_WIDTH = DOUBLE_COL
-    NEW_WIDTH = BASE_WIDTH * (4.1 / 3.0)
-    fig = plt.figure(figsize=(NEW_WIDTH, DOUBLE_COL * 0.38))
-    gs = fig.add_gridspec(
-        1, 3,
-        wspace=0.55,
-        width_ratios=[2.2, 0.7, 1.2],
-    )
+# ============================================================
+# Figure 3 — clinical vs research track distribution (3 panels)
+# ============================================================
+
+def figure3(school_df: pd.DataFrame, track_metrics: pd.DataFrame,
+            track_summary: dict) -> None:
+    """3 panels:
+      (a) Dot plot of (clinical M2-binary, research M2-binary) by school,
+          coloured by profession, with jitter. Equal limits + equal aspect so
+          the y=x reference line renders at a true 45 deg (no in-figure label;
+          the diagonal is described in the caption).
+      (b) Grouped bar plot of MEAN M1 crude credits by profession x track
+          (clinical vs research) with 95% percentile-bootstrap CI error bars
+          (10,000 resamples, seed=42). Lower bounds stay >= 0 by construction.
+      (c) Asymmetry counts bar (Both present / Only clinical / Only research /
+          Both absent).
+    """
+    # Size the figure so panel a's grid slot is SQUARE: then the equal-aspect
+    # scatter (set below) fills its slot exactly and panels a/b/c share the
+    # same drawn height (no vertical gap, no panel-balance violation).
+    fig_w = DOUBLE_COL
+    wspace = 0.5
+    width_ratios = [1.25, 1.10, 1.00]
+    _L, _R, _B, _T = 0.125, 0.9, 0.11, 0.88   # matplotlib default subplot margins
+    _n = 3
+    _S = (_R - _L) / (1.0 + (_n - 1) * wspace / _n)   # sum of axis-width fractions
+    w_a_in = (_S * width_ratios[0] / sum(width_ratios)) * fig_w
+    fig_h = w_a_in / (_T - _B)                          # axis height (in) == panel a width (in)
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    gs = fig.add_gridspec(1, 3, wspace=wspace, width_ratios=width_ratios)
     ax_a = fig.add_subplot(gs[0, 0])
     ax_b = fig.add_subplot(gs[0, 1])
     ax_c = fig.add_subplot(gs[0, 2])
 
-    # (a) Mandatory % by domain x college
-    DOMAIN_FOR_A = DOMAIN_ORDER
-    n_dom = len(DOMAIN_FOR_A)
-    bar_w = 0.25
-    x = np.arange(n_dom)
+    # ---------------- (a) Track dot plot ----------------
+    rng = np.random.default_rng(11)
+    df_a = track_metrics[["University", "College",
+                          "clinical_M2_binary", "research_M2_binary"]].copy()
+    # jitter strength
+    JITTER = 0.18
+    for college in COLLEGE_ORDER:
+        sub = df_a[df_a["College"] == college]
+        xs = sub["clinical_M2_binary"].astype(float).values
+        ys = sub["research_M2_binary"].astype(float).values
+        xj = xs + rng.uniform(-JITTER, JITTER, len(xs))
+        yj = ys + rng.uniform(-JITTER, JITTER, len(ys))
+        ax_a.scatter(xj, yj,
+                     c=COLLEGE_COLORS[college],
+                     s=22, alpha=0.78, edgecolors=EDGE_COLOR, linewidths=EDGE_LW,
+                     label=COLLEGE_SHORT[college], zorder=3)
 
-    for ci, college in enumerate(COLLEGE_ORDER):
-        sub = course_df[course_df["College_EN"] == college]
-        rates = []
-        for dom in DOMAIN_FOR_A:
-            col = DOMAIN_CSVCOL[dom]
-            dom_courses = sub[sub[col] == 1]
-            n = len(dom_courses)
-            if n > 0:
-                k = int(dom_courses["Is_Mandatory_Binary"].sum())
-                p = k / n * 100
-            else:
-                p = np.nan
-            rates.append(p)
-        offset = (ci - 1) * bar_w
-        rates_arr = np.array(rates, dtype=float)
-        ax_a.bar(x + offset, rates_arr, bar_w,
-                 color=COLLEGE_COLORS[college], alpha=0.88,
-                 edgecolor="white", linewidth=0.4,
-                 label=COLLEGE_SHORT[college])
-
-    ax_a.set_xticks(x)
-    ax_a.set_xticklabels([DOMAIN_ABBR[d] for d in DOMAIN_FOR_A],
-                         fontsize=5.8)
-    ax_a.set_ylabel("Mandatory courses (%)")
-    ax_a.set_ylim(0, 105)
-    ax_a.axhline(50, color=GRID_COLOR, lw=0.5, ls="--", zorder=0)
+    # 45 deg reference line y=x (described in the caption; no in-figure label).
+    max_val = max(df_a["clinical_M2_binary"].max(),
+                  df_a["research_M2_binary"].max())
+    lim_hi = max_val + 0.8
+    ax_a.plot([-0.5, lim_hi], [-0.5, lim_hi],
+              color="#888888", linestyle="--", linewidth=0.5, zorder=1)
+    # Equal limits + equal aspect so the y=x diagonal renders at a true 45 deg.
+    ax_a.set_xlim(-0.5, lim_hi)
+    ax_a.set_ylim(-0.5, lim_hi)
+    ax_a.set_aspect("equal", adjustable="box")
+    ax_a.set_xlabel("Clinical track year-weighted credits")
+    ax_a.set_ylabel("Research track year-weighted credits")
     ax_a.legend(loc="upper right", frameon=False, fontsize=5.5,
-                handlelength=1.0, handletextpad=0.4, ncol=1)
-    _panel_label(ax_a, "a", x=-0.12)
+                handlelength=0.8, handletextpad=0.4)
+    _panel_label(ax_a, "a", x=-0.30, y=1.06)
 
-    # (b) Maturity by governance (4-stage)
-    gov_cross = pd.crosstab(school_df["Governance"], school_df["Maturity"])
-    for m in MATURITY_ORDER:
-        if m not in gov_cross.columns:
-            gov_cross[m] = 0
-    gov_cross = gov_cross[MATURITY_ORDER]
-    gov_cross = gov_cross.reindex(["Public", "Private"])
-    n_per = gov_cross.sum(axis=1).values
-    pct_gov = gov_cross.div(gov_cross.sum(axis=1), axis=0) * 100
+    # ---------------- (b) Mean M1 crude credits by profession x track (bar + 95% bootstrap CI) ----------------
+    BAR_TRACKS = [("clinical", "clinical_credits_crude"),
+                  ("research", "research_credits_crude")]
+    bar_w = 0.34
+    rng_boot = np.random.default_rng(42)
+    upper_max = 0.0
+    for ci, college in enumerate(COLLEGE_ORDER):
+        sub = track_metrics[track_metrics["College"] == college]
+        for ti, (track, col) in enumerate(BAR_TRACKS):
+            pos = ci + (ti - 0.5) * bar_w
+            vals = sub[col].astype(float).values
+            mean, lo, hi = _bootstrap_ci_mean(vals, rng_boot)
+            # asymmetric error lengths; both >= 0 (lower bound bounded by 0)
+            err_lo = max(0.0, mean - lo)
+            err_hi = max(0.0, hi - mean)
+            ax_b.bar(pos, mean, width=bar_w * 0.85,
+                     color=TRACK_COLORS[track], alpha=0.55,
+                     edgecolor=EDGE_COLOR, linewidth=EDGE_LW, zorder=2)
+            ax_b.errorbar(pos, mean, yerr=[[err_lo], [err_hi]],
+                          fmt="none", ecolor="#333333", elinewidth=0.7,
+                          capsize=2.0, capthick=0.7, zorder=4)
+            upper_max = max(upper_max, hi)
 
-    x = np.arange(len(gov_cross))
-    bottom = np.zeros(len(gov_cross))
-    for m in MATURITY_ORDER:
-        vals = pct_gov[m].values
-        ax_b.bar(x, vals, bottom=bottom, width=0.55,
-                 color=MATURITY_COLORS[m], edgecolor="white", linewidth=0.5,
-                 label=MATURITY_LABELS[m])
-        for i, v in enumerate(vals):
-            if v >= 4:
-                txt_color = "#333333" if m == "None" else "white"
-                ax_b.text(i, bottom[i] + v / 2,
-                          f"{v:.1f}%\n(n={int(gov_cross[m].iloc[i])})",
-                          ha="center", va="center", fontsize=5.0,
-                          color=txt_color, linespacing=0.95)
-        bottom += vals
-
-    ax_b.set_xticks(x)
+    ax_b.set_xticks(np.arange(len(COLLEGE_ORDER)))
+    n_per_college = {c: int((track_metrics["College"] == c).sum())
+                     for c in COLLEGE_ORDER}
     ax_b.set_xticklabels(
-        [f"{g}\n(n={int(n_per[i])})" for i, g in enumerate(gov_cross.index)],
-        fontsize=5.8, linespacing=0.95)
-    ax_b.set_ylabel("Schools (%)")
-    ax_b.set_ylim(0, 100)
+        [f"{COLLEGE_SHORT[c]}\n(n={n_per_college[c]})" for c in COLLEGE_ORDER],
+        fontsize=6.0, linespacing=0.95)
+    ax_b.set_ylabel("Mean credits per school (unweighted)")
+    # Quantitative axis starts at 0 (bootstrap CI lower bounds stay >= 0).
+    ax_b.set_ylim(0, max(upper_max * 1.15, 1.0))
 
-    ax_b.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
-                ncol=4, frameon=False, fontsize=5.2,
-                handletextpad=0.3, columnspacing=0.5)
-    _panel_label(ax_b, "b", x=-0.25)
-
-    # (c) Stratum-level mandatory gap connecting points
-    strat_df = pd.read_csv(STATS_DIR / "mandatory_gap_stratified.csv")
-
-    AXIS_PROF = "#4878D0"
-    AXIS_GOV = "#EE854A"
-    AXIS_REG = "#6ACC64"
-
-    label_map = {
-        "Medicine": "Medical",
-        "Dentistry": "Dental",
-        "Korean Medicine": "Korean medicine",
-        "국립": "Public",
-        "사립": "Private",
-        "1": "Capital area",
-        "0": "Non-Capital area",
-    }
-
-    rows = []
-    for axis_name, axis_color, axis_key, order_levels in [
-        ("Profession", AXIS_PROF, "College",    ["Medicine", "Dentistry", "Korean Medicine"]),
-        ("Governance", AXIS_GOV,  "Governance", ["국립", "사립"]),
-        ("Region",     AXIS_REG,  "Region",     ["1", "0"]),
-    ]:
-        df_axis = strat_df[strat_df["axis"] == axis_key].copy()
-        df_axis["level"] = df_axis["level"].astype(str)
-        for lv in order_levels:
-            sub = df_axis[df_axis["level"] == lv]
-            if len(sub) == 0:
-                continue
-            r = sub.iloc[0]
-            rows.append({
-                "axis": axis_name,
-                "axis_color": axis_color,
-                "label": label_map.get(lv, lv),
-                "Foundational_Mandatory_Pct": float(r["D1_pct"]),
-                "AI_Specific_Mandatory_Pct": float(r["AI_pct"]),
-                "Gap_Pct_Points": float(r["gap_pp"]),
-                "Fisher_p": float(r["P_fisher"]),
-            })
-    strat = pd.DataFrame(rows)
-
-    y_positions = np.arange(len(strat))[::-1]
-    for yi, (_, row) in zip(y_positions, strat.iterrows()):
-        f = row["Foundational_Mandatory_Pct"]
-        a = row["AI_Specific_Mandatory_Pct"]
-        ax_c.plot([a, f], [yi, yi], color="#666666", lw=0.8, zorder=2)
-        ax_c.scatter(a, yi, s=32, color=AI_SPECIFIC_COLOR,
-                     edgecolor="black", linewidth=0.4, zorder=4)
-        ax_c.scatter(f, yi, s=32, color=FOUNDATIONAL_COLOR,
-                     edgecolor="black", linewidth=0.4, zorder=4)
-        p = row["Fisher_p"]
-        if p < 0.001:
-            p_str = "P<.001"
-        elif p < 0.01:
-            p_str = f"P={p:.3f}".replace("0.", ".")
-        else:
-            p_str = f"P={p:.2f}".replace("0.", ".")
-        ax_c.text(max(a, f) + 4.5, yi,
-                  f"{row['Gap_Pct_Points']:.1f} pp ({p_str})",
-                  va="center", fontsize=5.5, color="#333333")
-
-    ax_c.set_yticks(y_positions)
-    ax_c.set_yticklabels(strat["label"].tolist(), fontsize=5.8)
-    for tick, color in zip(ax_c.get_yticklabels(), strat["axis_color"]):
-        tick.set_color(color)
-
-    ax_c.set_xlim(25, 116)
-    ax_c.set_xlabel("Mandatory courses (%)")
-    ax_c.grid(axis="x", color="#EEEEEE", linewidth=0.4, zorder=0)
-
-    handles_combined = [
-        Patch(facecolor=AXIS_PROF, edgecolor="none", label="Profession"),
-        Patch(facecolor=AXIS_GOV,  edgecolor="none", label="Governance"),
-        Patch(facecolor=AXIS_REG,  edgecolor="none", label="Region"),
-        plt.scatter([], [], s=28, color=FOUNDATIONAL_COLOR,
-                    edgecolor="black", linewidth=0.4, label="Quant. foundations"),
-        plt.scatter([], [], s=28, color=AI_SPECIFIC_COLOR,
-                    edgecolor="black", linewidth=0.4, label="AI-specific"),
+    handles_b = [
+        Patch(facecolor=TRACK_COLORS["clinical"], alpha=0.55,
+              edgecolor=EDGE_COLOR, linewidth=EDGE_LW, label="Clinical track"),
+        Patch(facecolor=TRACK_COLORS["research"], alpha=0.55,
+              edgecolor=EDGE_COLOR, linewidth=EDGE_LW, label="Research track"),
     ]
-    ax_c.legend(handles=handles_combined, loc="upper center",
-                bbox_to_anchor=(0.5, -0.16), ncol=5,
-                frameon=False, fontsize=5.5,
-                handletextpad=0.4, columnspacing=0.8,
-                borderpad=0.3)
-    _panel_label(ax_c, "c", x=-0.20)
+    ax_b.legend(handles=handles_b,
+                loc="upper center", bbox_to_anchor=(0.5, -0.20),
+                ncol=2, frameon=False, fontsize=5.5,
+                handletextpad=0.4, columnspacing=1.0)
+    _panel_label(ax_b, "b", x=-0.16)
+
+    # ---------------- (c) Asymmetry counts bar ----------------
+    asym = track_summary["asymmetry_counts"]
+    n_total = asym["n_schools_total"]
+    categories = [
+        ("Both tracks\npresent",  asym["both_tracks_present"],  "#5D6D7E"),
+        ("Only clinical",          asym["only_clinical"],         TRACK_COLORS["clinical"]),
+        ("Only research",          asym["only_research"],         TRACK_COLORS["research"]),
+        ("Both tracks\nabsent",    asym["both_tracks_absent"],   "#BBBBBB"),
+    ]
+    y_pos = np.arange(len(categories))[::-1]
+    counts = [c[1] for c in categories]
+    colors_c = [c[2] for c in categories]
+    labels_c = [c[0] for c in categories]
+    ax_c.barh(y_pos, counts, height=0.62,
+              color=colors_c, edgecolor=EDGE_COLOR, linewidth=EDGE_LW)
+    ax_c.set_yticks(y_pos)
+    ax_c.set_yticklabels(labels_c, fontsize=6.0, linespacing=0.95)
+    for yi, cnt in zip(y_pos, counts):
+        pct = 100.0 * cnt / n_total
+        ax_c.text(cnt + max(counts) * 0.02, yi, f"{cnt} ({pct:.1f}%)",
+                  va="center", fontsize=5.8, color="#333333")
+    ax_c.set_xlabel("Schools (n=63)")
+    ax_c.set_xlim(0, max(counts) * 1.32)
+    _panel_label(ax_c, "c", x=-0.30)
 
     _save(fig, "Figure_3")
 
 
-# Supplementary Note 5: per-profession year x domain placement
-def supplementary_note_5(course_df: pd.DataFrame) -> None:
+# ============================================================
+# Figure 4 — institutional-characteristic axes (2-panel forest)
+# ============================================================
+
+# Institutional axes, top-to-bottom on the forest y-axis. Same order in both
+# panels so the rows read straight across. Reference category for the two
+# profession dummies is medical schools.
+INST_AXIS_ORDER = ["Is_Public", "Capital_Area", "Is_Dentistry",
+                   "Is_KoreanMedicine", "Quota_scaled"]
+INST_AXIS_LABELS = {
+    "Is_Public":         "Public (vs private)",
+    "Capital_Area":      "Capital area (vs non-capital)",
+    "Is_Dentistry":      "Dental (vs medical)",
+    "Is_KoreanMedicine": "Korean medicine (vs medical)",
+    "Quota_scaled":      "Admission quota (per SD)",
+}
+# Neutral dark for the single OLS series (a); not a category colour.
+OLS_POINT_COLOR = "#333333"
+
+
+def _fmt_p(p: float) -> str:
+    """npj-style P-value string: italic *P*, no leading zero.
+
+    Precision rule (reproduces the two worked examples P=.036 and P=.09):
+      * P < .001  -> "P<.001"  (none in this dataset, kept for safety)
+      * P < .10   -> three decimals with trailing zeros stripped
+                     (0.0359 -> .036, 0.0904 -> .09) so estimates sitting near
+                     the .05 boundary are not flattened to two decimals.
+      * P >= .10  -> two decimals (.22, .14, .88, .92, .72, ...).
+    Significant and non-significant values use the identical format (no
+    emphasis), per the brief. The literal "P" is italicised by the caller via
+    a math-text "$P$" so this helper returns only the numeric tail + relation.
+    """
+    if p < 0.001:
+        return "<.001"
+    if p < 0.10:
+        # 3 decimals, then strip only TRAILING zeros: 0.0359 -> .036,
+        # 0.0904 -> .090 -> .09.
+        s = f"{p:.3f}".rstrip("0")
+    else:
+        # 2 decimals, trailing zeros KEPT: 0.3011 -> .30, 0.2543 -> .25.
+        s = f"{p:.2f}"
+    s = s.lstrip("0")            # strip the single leading zero -> .036 / .30
+    return "=" + s
+
+
+def figure4(ols_total_credits: pd.DataFrame,
+            track_presence: pd.DataFrame) -> None:
+    """2-panel forest figure of institutional-characteristic axes.
+
+    (a) Multivariable OLS coefficients (beta, 95% CI) for per-school total
+        credits. One point + horizontal CI per axis; vertical dashed reference
+        at 0 (no effect on the additive credit scale).
+    (b) Multivariable logistic odds ratios (OR, 95% CI) for holding each career
+        track (clinical = blue, research = red, matching Fig 3). Two dodged
+        points per axis; log x-axis; vertical dashed reference at OR = 1.
+
+    Both significant and non-significant terms are drawn identically (same
+    marker size, full opacity, no significance-based colour/alpha) so the
+    reader sees every estimate on equal footing. Visualisation only: every
+    value is read straight from the CSVs; nothing is recomputed here.
+    """
+    # ---- panel (a) data: OLS beta + 95% CI -------------------------------
+    ols = ols_total_credits.set_index("variable")
+
+    # ---- panel (b) data: logistic OR + 95% CI per track ------------------
+    lg = track_presence[track_presence["variable"].isin(INST_AXIS_ORDER)].copy()
+
+    n_axes = len(INST_AXIS_ORDER)
+    # Top-to-bottom: row 0 (Public) at the top.
+    y_base = np.arange(n_axes)[::-1].astype(float)
+
+    # Height raised from the original 0.40 to 0.50 of the double-column width to
+    # open vertical room for the per-estimate P-value labels: panel (b) stacks a
+    # clinical label above and a research label below each dodged pair, and the
+    # taller panel keeps the converging inter-row labels from touching while
+    # both panels stay the same height (no panel-balance violation).
+    fig = plt.figure(figsize=(DOUBLE_COL, DOUBLE_COL * 0.50))
+    # Panel (a) is wider to host the long left y-axis labels (shared across the
+    # figure); panel (b) need not repeat them.
+    gs = fig.add_gridspec(1, 2, wspace=0.10, width_ratios=[1.32, 1.00])
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+
+    CAP = 0.10           # half-height of the CI end-cap whiskers
+    POINT_S = 26         # marker area (pt^2), identical for every estimate
+    CI_LW = 0.9
+
+    # ============ (a) OLS beta (total credits) ============
+    # P-value text sits a fixed distance ABOVE each point, centred on beta, so
+    # it never overlaps the horizontal CI bar, the end-caps or the y-axis
+    # labels (panel a has one estimate per row, rows 1.0 apart).
+    P_DY_A = 0.26        # vertical offset of the P label above the point (data y)
+    P_FS = 5.2           # P-value font size (pt)
+    ax_a.axvline(0.0, color="#888888", linestyle="--", linewidth=0.5, zorder=1)
+    for i, ax_name in enumerate(INST_AXIS_ORDER):
+        r = ols.loc[ax_name]
+        beta = float(r["beta"])
+        lo = float(r["CI_low"])
+        hi = float(r["CI_high"])
+        p = float(r["P"])
+        y = y_base[i]
+        ax_a.plot([lo, hi], [y, y], color=OLS_POINT_COLOR, lw=CI_LW, zorder=3)
+        ax_a.plot([lo, lo], [y - CAP, y + CAP], color=OLS_POINT_COLOR,
+                  lw=CI_LW, zorder=3)
+        ax_a.plot([hi, hi], [y - CAP, y + CAP], color=OLS_POINT_COLOR,
+                  lw=CI_LW, zorder=3)
+        ax_a.scatter([beta], [y], s=POINT_S, c=OLS_POINT_COLOR,
+                     edgecolor=EDGE_COLOR, linewidth=EDGE_LW, zorder=4)
+        ax_a.text(beta, y + P_DY_A, f"$P${_fmt_p(p)}",
+                  ha="center", va="bottom", fontsize=P_FS,
+                  color=OLS_POINT_COLOR, zorder=5)
+
+    # Symmetric x-limits around 0 with headroom past the widest CI.
+    a_lo = float(ols["CI_low"].min())
+    a_hi = float(ols["CI_high"].max())
+    a_span = max(abs(a_lo), abs(a_hi)) * 1.12
+    ax_a.set_xlim(-a_span, a_span)
+    ax_a.set_ylim(-0.6, n_axes - 0.4)
+    ax_a.set_yticks(y_base)
+    ax_a.set_yticklabels([INST_AXIS_LABELS[a] for a in INST_AXIS_ORDER],
+                         fontsize=6.5)
+    ax_a.set_xlabel("Adjusted β, total credits per school (95% CI)")
+    ax_a.set_title("Total credits", fontsize=7.5, pad=3)
+    ax_a.grid(axis="x", which="major", color="#EEEEEE", linewidth=0.4, zorder=0)
+    _panel_label(ax_a, "a", x=-0.62, y=1.10)
+
+    # ============ (b) Logistic OR (track holding) ============
+    OFFSET = 0.18
+    track_specs = [
+        ("clinical", +OFFSET, TRACK_COLORS["clinical"], "Clinical track"),
+        ("research", -OFFSET, TRACK_COLORS["research"], "Research track"),
+    ]
+    ax_b.axvline(1.0, color="#888888", linestyle="--", linewidth=0.5, zorder=1)
+    # Each track's P-value is drawn in the track colour, vertically offset AWAY
+    # from the row centre: clinical (upper dodge) gets its label ABOVE its point,
+    # research (lower dodge) BELOW its point. This keeps the two labels ~0.7 data
+    # units apart so they never overlap regardless of where the markers fall on
+    # the log x-axis, and the colour ties each P to its dodged estimate.
+    P_DY_B = 0.12        # P label offset from the dodged point (data y), per track
+    for track_name, off, color, _label in track_specs:
+        sub = lg[lg["track"] == track_name].set_index("variable")
+        p_va = "bottom" if off > 0 else "top"          # clinical above, research below
+        p_dy = P_DY_B if off > 0 else -P_DY_B
+        for i, ax_name in enumerate(INST_AXIS_ORDER):
+            r = sub.loc[ax_name]
+            or_val = float(r["OR"])
+            lo = float(r["CI_low"])
+            hi = float(r["CI_high"])
+            p = float(r["P"])
+            y = y_base[i] + off
+            ax_b.plot([lo, hi], [y, y], color=color, lw=CI_LW, zorder=3)
+            ax_b.plot([lo, lo], [y - 0.08, y + 0.08], color=color,
+                      lw=CI_LW, zorder=3)
+            ax_b.plot([hi, hi], [y - 0.08, y + 0.08], color=color,
+                      lw=CI_LW, zorder=3)
+            ax_b.scatter([or_val], [y], s=POINT_S, c=color,
+                         edgecolor=EDGE_COLOR, linewidth=EDGE_LW, zorder=4)
+            ax_b.text(or_val, y + p_dy, f"$P${_fmt_p(p)}",
+                      ha="center", va=p_va, fontsize=P_FS,
+                      color=color, zorder=5)
+
+    ax_b.set_xscale("log")
+    # Range chosen so the widest CI (Capital-area research, up to 10.6) is held
+    # without truncation; log scale absorbs the asymmetry around OR = 1.
+    ax_b.set_xlim(0.13, 14)
+    xticks = [0.2, 0.5, 1, 2, 5, 10]
+    ax_b.set_xticks(xticks)
+    ax_b.set_xticklabels([str(x) for x in xticks], fontsize=6)
+    ax_b.set_ylim(-0.6, n_axes - 0.4)
+    ax_b.set_yticks(y_base)
+    ax_b.set_yticklabels([])          # rows already labelled on panel (a)
+    ax_b.tick_params(axis="y", length=0)
+    ax_b.set_xlabel("Adjusted odds ratio, track holding (95% CI), log scale")
+    ax_b.set_title("Track holding", fontsize=7.5, pad=3)
+    ax_b.grid(axis="x", which="major", color="#EEEEEE", linewidth=0.4, zorder=0)
+
+    handles_b = [
+        plt.Line2D([0], [0], color=TRACK_COLORS["clinical"], lw=CI_LW,
+                   marker="o", markersize=5, markeredgecolor=EDGE_COLOR,
+                   markeredgewidth=EDGE_LW, label="Clinical track"),
+        plt.Line2D([0], [0], color=TRACK_COLORS["research"], lw=CI_LW,
+                   marker="o", markersize=5, markeredgecolor=EDGE_COLOR,
+                   markeredgewidth=EDGE_LW, label="Research track"),
+    ]
+    ax_b.legend(handles=handles_b, loc="upper center",
+                bbox_to_anchor=(0.5, -0.16), ncol=2, frameon=False,
+                fontsize=6, handletextpad=0.5, columnspacing=1.5)
+    _panel_label(ax_b, "b", x=-0.06, y=1.10)
+
+    _save(fig, "Figure_4")
+
+
+# ============================================================
+# Supplementary Note 1: Per-profession year × domain placement
+# (unchanged from v10; only output filename differs)
+# ============================================================
+
+def supplementary_note_1(course_df: pd.DataFrame) -> None:
+    """Per-profession decomposition of Fig 1d/1e (6 small-multiple heatmaps).
+
+    Cell labels are kept as integer percentages here (unlike Fig 1c/1d/1e,
+    which show "%(numerator/denominator)"). This 2x3 layout makes each cell
+    only ~13 pt wide, which cannot hold the ~16 pt "(n/d)" fraction line
+    without clipping; the integer % stays legible. The fraction notation is
+    therefore reserved for the larger Fig 1 cells.
+    """
     base = plt.cm.Blues
     colors_list = [(1, 1, 1)] + [base(t) for t in np.linspace(0.18, 0.95, 254)]
     cmap_blue = LinearSegmentedColormap.from_list("white_blues", colors_list, N=256)
@@ -946,9 +1170,12 @@ def supplementary_note_5(course_df: pd.DataFrame) -> None:
     last_im_top = None
     for j, (prof_key, prof_label) in enumerate(professions):
         ax = fig.add_subplot(gs[0, j])
-        share = _course_level_stage_share_resolved(course_df, college_filter=prof_key)
+        # Supp Note 1 keeps integer-only cell labels (see note in supplementary_
+        # note_1 docstring / caption): its small-multiple cells are ~13 pt wide,
+        # too narrow for the two-line "%(n/d)" string, so counts are unused here.
+        share, _ = _course_level_stage_share_resolved(course_df, college_filter=prof_key)
         cols = list(share.columns)
-        im = ax.imshow(share.values, cmap=cmap_blue, vmin=0, vmax=100, aspect="auto")
+        im = ax.imshow(share.values, cmap=cmap_blue, vmin=0, vmax=100, aspect="equal")
         last_im_top = im
         ax.set_xticks(range(len(cols)))
         ax.set_xticklabels([stage_labels_d[c] for c in cols], fontsize=5.6,
@@ -979,6 +1206,7 @@ def supplementary_note_5(course_df: pd.DataFrame) -> None:
                 tcol = "white" if v >= 55 else "black"
                 ax.text(jj, ii, f"{v:.0f}", ha="center", va="center",
                         fontsize=5.4, color=tcol, zorder=3)
+        _draw_cell_grid(ax, share.shape[0], share.shape[1])
         for s in ax.spines.values():
             s.set_visible(False)
         ax.set_xlabel("Grade-resolved subset", fontsize=6)
@@ -997,9 +1225,11 @@ def supplementary_note_5(course_df: pd.DataFrame) -> None:
     for j, (prof_key, prof_label) in enumerate(professions):
         ax = fig.add_subplot(gs[1, j])
         bottom_axes.append(ax)
-        share = _course_level_stage_share_full(course_df, college_filter=prof_key)
+        # Supp Note 1 keeps integer-only cell labels (narrow small-multiple
+        # cells); the count/total returns are unused here.
+        share, _, _ = _course_level_stage_share_full(course_df, college_filter=prof_key)
         cols = list(share.columns)
-        im = ax.imshow(share.values, cmap=cmap_blue, vmin=0, vmax=100, aspect="auto")
+        im = ax.imshow(share.values, cmap=cmap_blue, vmin=0, vmax=100, aspect="equal")
         last_im_bot = im
         ax.set_xticks(range(len(cols)))
         ax.set_xticklabels([stage_labels_e[c] for c in cols], fontsize=5.6)
@@ -1029,11 +1259,14 @@ def supplementary_note_5(course_df: pd.DataFrame) -> None:
                 tcol = "white" if v >= 55 else "black"
                 ax.text(jj, ii, f"{v:.0f}", ha="center", va="center",
                         fontsize=5.6, color=tcol, zorder=3)
+        _draw_cell_grid(ax, share.shape[0], share.shape[1])
         for s in ax.spines.values():
             s.set_visible(False)
         ax.set_xlabel("Full sample (collapsed)", fontsize=6)
         ax.set_title(prof_label, fontsize=7, pad=4)
-        _panel_label(ax, panel_letters_bot[j], x=-0.22, y=1.12)
+        # These 2-column panels are narrow once squared, so the centred title
+        # spans wider than the panel; place the label clearly ABOVE the title.
+        _panel_label(ax, panel_letters_bot[j], x=-0.30, y=1.30)
 
     if last_im_bot is not None:
         cbar_bot = fig.colorbar(last_im_bot, ax=bottom_axes, shrink=0.55,
@@ -1042,43 +1275,53 @@ def supplementary_note_5(course_df: pd.DataFrame) -> None:
         cbar_bot.outline.set_linewidth(0.4)
         cbar_bot.set_label("Share of domain courses (%)", fontsize=6)
 
-    _save(fig, "Supplementary_Note_5_PerProfession")
+    _save(fig, "Supplementary_Note_1_PerProfession")
 
 
+# ============================================================
 # Main
+# ============================================================
+
 def main() -> int:
     print("=" * 70)
-    print("Figures (1, 2, 3) + Supplementary Note 5")
+    print("Figures (1, 2, 3, 4) + Supplementary Note 1")
     print("=" * 70)
 
     setup_style()
     course_df = load_classification()
-    school_df = load_school()
-    summary = load_summary()
+    school_df = load_school_v11()
+    summary = load_summary_v11()
+    track_metrics = load_track_metrics_v11()
+    track_summary = load_track_summary_v11()
+    track_presence = load_track_presence_logistic_v11()
+    ols_total_credits = load_continuous_ols_total_credits_v11()
 
     print(f"  Loaded {len(course_df)} courses across {len(school_df)} schools")
     print(f"  Schools per college: " +
           ", ".join(f"{c}={(school_df['College_EN']==c).sum()}" for c in COLLEGE_ORDER))
-    print(f"  Maturity counts: " +
-          ", ".join(f"{m}={(school_df['Maturity']==m).sum()}" for m in MATURITY_ORDER))
     print(f"  Capital_Area: " +
           ", ".join(f"{r}={(school_df['Region_Binary']==r).sum()}"
                     for r in ["Capital area", "Non-Capital area"]))
     print(f"  Governance: " +
           ", ".join(f"{g}={(school_df['Governance']==g).sum()}"
                     for g in ["Public", "Private"]))
+    print(f"  Track metrics rows: {len(track_metrics)}")
+    print(f"  Track presence logistic rows: {len(track_presence)}")
 
     print("\n  Figure 1: Quantitative foundation-centric curriculum...")
     figure1(course_df, school_df)
 
-    print("\n  Figure 2: AI-specific institutionalization...")
+    print("\n  Figure 2: AI-specific institutionalization (2-panel)...")
     figure2(course_df, school_df, summary)
 
-    print("\n  Figure 3: Structure of cross-school variation...")
-    figure3(course_df, school_df, summary)
+    print("\n  Figure 3: Clinical vs research track distribution (3-panel)...")
+    figure3(school_df, track_metrics, track_summary)
 
-    print("\n  Supplementary Note 5: Per-profession year x domain placement...")
-    supplementary_note_5(course_df)
+    print("\n  Figure 4: Institutional-characteristic axes (2-panel forest)...")
+    figure4(ols_total_credits, track_presence)
+
+    print("\n  Supplementary Note 1: Per-profession year × domain placement...")
+    supplementary_note_1(course_df)
 
     print("\nDone.")
     return 0

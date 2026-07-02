@@ -8,10 +8,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SRC_DIR = ROOT / "src"
 
+# Dependency order: analysis writes the per-school feature table and track
+# metrics that the supplementary analysis, region test, power analysis, and
+# figures all read; figures additionally read the supplementary regression CSVs.
 STAGES = [
-    ("analysis.py", "Primary analysis (Option B Advanced, 4-stage maturity)"),
-    ("supplementary_analysis.py", "Supplementary analysis (Adv vs Foundational, ordinal logistic)"),
-    ("figures.py", "Figures (1, 2, 3) + Supplementary Note 5"),
+    ("analysis.py", "Primary analysis (n=63)"),
+    ("supplementary_analysis.py", "Supplementary analyses (extreme groups, OLS, tracks)"),
+    ("region.py", "Capital vs non-Capital Mann-Whitney (Holm)"),
+    ("power.py", "Retrospective power / MDE"),
+    ("figures.py", "Figures 1-4 + Supplementary Note 1"),
 ]
 
 
