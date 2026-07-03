@@ -177,7 +177,7 @@ COLLEGE_COLORS = {
     "Korean Medicine": "#6ACC64",
 }
 
-# Track colour mapping (stable across Figure 3 and the supplementary figure)
+# Track color mapping (stable across Figure 3 and the supplementary figure)
 TRACK_COLORS = {
     "clinical": "#1f77b4",
     "research": "#d62728",
@@ -193,20 +193,20 @@ GOV_COLORS = {"Public": "#4878D0", "Private": "#D4D4D4"}
 GRID_COLOR = "#D9D9D9"
 
 # ------------------------------------------------------------------
-# Uniform thin grey edge applied to EVERY filled mark (bars, stacked-bar
+# Uniform thin gray edge applied to EVERY filled mark (bars, stacked-bar
 # segments, heatmap cells, scatter / bubble markers) across all panels and
 # all figures, per the visual-consistency rule. A single constant keeps
 # the stroke width identical for every graphic type (heatmaps included), so
 # no panel looks edged while another looks borderless.
 # ------------------------------------------------------------------
 EDGE_LW = 0.5          # points; identical for bars, cells and markers
-EDGE_COLOR = "#999999"  # mid grey, legible on white without overpowering fills
+EDGE_COLOR = "#999999"  # mid gray, legible on white without overpowering fills
 
 
 def _draw_cell_grid(ax, nrows: int, ncols: int) -> None:
-    """Overlay a uniform thin grey border on every cell of an imshow heatmap.
+    """Overlay a uniform thin gray border on every cell of an imshow heatmap.
 
-    imshow places cell centres at integer (col, row); each cell spans
+    imshow places cell centers at integer (col, row); each cell spans
     [j-0.5, j+0.5] x [i-0.5, i+0.5]. We stroke a facecolor='none' rectangle
     per cell so the grid is identical for filled, masked and zero cells.
     """
@@ -637,7 +637,7 @@ def figure1(course_df: pd.DataFrame, school_df: pd.DataFrame) -> None:
 
     pos_d = ax_d.get_position()
     # Panel d is now aspect='equal', so its drawn image is square-celled and
-    # centred inside its allocated box. Derive the TRUE square-cell side (in.)
+    # centerd inside its allocated box. Derive the TRUE square-cell side (in.)
     # from the limiting dimension, then size panel e so its 2x5 cells are
     # square AND the same physical size as panel d's cells.
     s_cell = min(pos_d.width * figW / 6.0,
@@ -801,7 +801,7 @@ def figure3(school_df: pd.DataFrame, track_metrics: pd.DataFrame,
             track_summary: dict) -> None:
     """3 panels:
       (a) Dot plot of (clinical M2-binary, research M2-binary) by school,
-          coloured by profession, with jitter. Equal limits + equal aspect so
+          colored by profession, with jitter. Equal limits + equal aspect so
           the y=x reference line renders at a true 45 deg (no in-figure label;
           the diagonal is described in the caption).
       (b) Grouped bar plot of MEAN M1 crude credits by profession x track
@@ -949,7 +949,7 @@ INST_AXIS_LABELS = {
     "Is_KoreanMedicine": "Korean medicine (vs medical)",
     "Quota_scaled":      "Admission quota (per SD)",
 }
-# Neutral dark for the single OLS series (a); not a category colour.
+# Neutral dark for the single OLS series (a); not a category color.
 OLS_POINT_COLOR = "#333333"
 
 
@@ -991,8 +991,8 @@ def figure4(ols_total_credits: pd.DataFrame,
         points per axis; log x-axis; vertical dashed reference at OR = 1.
 
     Both significant and non-significant terms are drawn identically (same
-    marker size, full opacity, no significance-based colour/alpha) so the
-    reader sees every estimate on equal footing. Visualisation only: every
+    marker size, full opacity, no significance-based color/alpha) so the
+    reader sees every estimate on equal footing. Visualization only: every
     value is read straight from the CSVs; nothing is recomputed here.
     """
     # ---- panel (a) data: OLS beta + 95% CI -------------------------------
@@ -1018,16 +1018,19 @@ def figure4(ols_total_credits: pd.DataFrame,
     ax_b = fig.add_subplot(gs[0, 1])
 
     CAP = 0.10           # half-height of the CI end-cap whiskers
-    POINT_S = 26         # marker area (pt^2), identical for every estimate
-    CI_LW = 0.9
+    POINT_S = 32         # marker area (pt^2), identical for every estimate
+    CI_LW = 1.1
+    REF_COLOR = "#BBBBBB"    # vertical reference-line color
+    REF_LW = 1.2             # vertical reference-line width
+    REF_DASH = (0, (6, 3))   # vertical reference-line dash pattern
 
     # ============ (a) OLS beta (total credits) ============
-    # P-value text sits a fixed distance ABOVE each point, centred on beta, so
+    # P-value text sits a fixed distance ABOVE each point, centered on beta, so
     # it never overlaps the horizontal CI bar, the end-caps or the y-axis
     # labels (panel a has one estimate per row, rows 1.0 apart).
     P_DY_A = 0.26        # vertical offset of the P label above the point (data y)
-    P_FS = 5.2           # P-value font size (pt)
-    ax_a.axvline(0.0, color="#888888", linestyle="--", linewidth=0.5, zorder=1)
+    P_FS = 6.0           # P-value font size (pt)
+    ax_a.axvline(0.0, color=REF_COLOR, linestyle=REF_DASH, linewidth=REF_LW, zorder=1)
     for i, ax_name in enumerate(INST_AXIS_ORDER):
         r = ols.loc[ax_name]
         beta = float(r["beta"])
@@ -1066,12 +1069,12 @@ def figure4(ols_total_credits: pd.DataFrame,
         ("clinical", +OFFSET, TRACK_COLORS["clinical"], "Clinical track"),
         ("research", -OFFSET, TRACK_COLORS["research"], "Research track"),
     ]
-    ax_b.axvline(1.0, color="#888888", linestyle="--", linewidth=0.5, zorder=1)
-    # Each track's P-value is drawn in the track colour, vertically offset AWAY
-    # from the row centre: clinical (upper dodge) gets its label ABOVE its point,
+    ax_b.axvline(1.0, color=REF_COLOR, linestyle=REF_DASH, linewidth=REF_LW, zorder=1)
+    # Each track's P-value is drawn in the track color, vertically offset AWAY
+    # from the row center: clinical (upper dodge) gets its label ABOVE its point,
     # research (lower dodge) BELOW its point. This keeps the two labels ~0.7 data
     # units apart so they never overlap regardless of where the markers fall on
-    # the log x-axis, and the colour ties each P to its dodged estimate.
+    # the log x-axis, and the color ties each P to its dodged estimate.
     P_DY_B = 0.12        # P label offset from the dodged point (data y), per track
     for track_name, off, color, _label in track_specs:
         sub = lg[lg["track"] == track_name].set_index("variable")
@@ -1104,7 +1107,7 @@ def figure4(ols_total_credits: pd.DataFrame,
     ax_b.set_xticklabels([str(x) for x in xticks], fontsize=6)
     ax_b.set_ylim(-0.6, n_axes - 0.4)
     ax_b.set_yticks(y_base)
-    ax_b.set_yticklabels([])          # rows already labelled on panel (a)
+    ax_b.set_yticklabels([])          # rows already labeled on panel (a)
     ax_b.tick_params(axis="y", length=0)
     ax_b.set_xlabel("Adjusted odds ratio, track holding (95% CI), log scale")
     ax_b.set_title("Track holding", fontsize=7.5, pad=3)
@@ -1264,7 +1267,7 @@ def supplementary_note_1(course_df: pd.DataFrame) -> None:
             s.set_visible(False)
         ax.set_xlabel("Full sample (collapsed)", fontsize=6)
         ax.set_title(prof_label, fontsize=7, pad=4)
-        # These 2-column panels are narrow once squared, so the centred title
+        # These 2-column panels are narrow once squared, so the centerd title
         # spans wider than the panel; place the label clearly ABOVE the title.
         _panel_label(ax, panel_letters_bot[j], x=-0.30, y=1.30)
 

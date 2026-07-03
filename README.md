@@ -20,7 +20,7 @@ mostly in the pre-clinical years.
 ## What this code does
 
 Starting from a frozen, human-adjudicated course classification (each course
-labelled across five domains) and the raw institutional metadata, the pipeline
+labeled across five domains) and the raw institutional metadata, the pipeline
 reproduces the statistics and figures reported in the manuscript:
 
 - Domain credit distribution and school-level adoption rates (denominator n=63)
