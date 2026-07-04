@@ -532,9 +532,15 @@ def run():
     summary['refconfig_fisher_governance'] = fisher_refconfig_vs_other('Public_Private', '국립', '사립')
     summary['refconfig_fisher_region'] = fisher_refconfig_vs_other('Capital_Area', 1, 0)
 
-    kw_credits = stats.kruskal(*[grp['total_credits'].values for _, grp in schools.groupby('College')])
+    kw_groups = [grp['total_credits'].values for _, grp in schools.groupby('College')]
+    kw_credits = stats.kruskal(*kw_groups)
+    _kw_k = len(kw_groups)
+    _kw_N = int(sum(len(g) for g in kw_groups))
     summary['kw_total_credits_by_profession'] = {
-        'H': float(kw_credits.statistic), 'P': float(kw_credits.pvalue)}
+        'H': float(kw_credits.statistic), 'P': float(kw_credits.pvalue),
+        'k': _kw_k, 'N': _kw_N, 'group_n': [int(len(g)) for g in kw_groups],
+        # epsilon-squared effect size for Kruskal-Wallis: (H - k + 1) / (N - k)
+        'epsilon_sq': float((kw_credits.statistic - _kw_k + 1) / (_kw_N - _kw_k))}
 
     # Friedman + pairwise Wilcoxon (Holm) on 5-domain credits
     cred_mat = schools[[f'{d}_credits' for d in DOMAINS]].values

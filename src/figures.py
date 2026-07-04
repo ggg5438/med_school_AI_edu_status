@@ -56,6 +56,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -252,25 +253,42 @@ def _style_cbar(cb, label):
     return cb
 
 
-def _bootstrap_ci_mean(vals, rng, n_boot: int = 10000, ci: float = 95.0):
-    """Percentile bootstrap CI for the mean of a non-negative sample.
+def _bootstrap_ci_mean(vals, rng, n_boot: int = 1000, ci: float = 95.0):
+    """Bias-corrected and accelerated (BCa) bootstrap CI for the mean.
 
-    Because every resample is drawn from non-negative observations, every
-    bootstrap mean is >= 0, so the lower bound is bounded below by 0 by
-    construction (no negative lower limit can arise).
+    Ported from ``bca_bootstrap_proportion`` (analysis.py) so the whole
+    manuscript shares one bootstrap spec: 1,000 resamples, BCa, seed 42.
+    The statistic is the sample mean (a proportion is just the mean of a 0/1
+    array, so the port only swaps in np.mean). No stratification is applied:
+    each cell here is one profession's schools, a single stratum, so a plain
+    1,000-resample BCa of the cell's values is correct.
+
+    z0 is the bias correction; ``a`` is the acceleration from jackknife
+    skewness. seed 42 is carried by the passed rng.
     """
     vals = np.asarray(vals, dtype=float)
     vals = vals[~np.isnan(vals)]
     n = len(vals)
     if n == 0:
         return np.nan, np.nan, np.nan
-    mean = float(vals.mean())
+    point = float(vals.mean())
     if n < 2:
-        return mean, mean, mean
-    boot = rng.choice(vals, size=(n_boot, n), replace=True).mean(axis=1)
-    lo = float(np.percentile(boot, (100.0 - ci) / 2.0))
-    hi = float(np.percentile(boot, 100.0 - (100.0 - ci) / 2.0))
-    return mean, lo, hi
+        return point, point, point
+    boots = np.empty(n_boot)
+    for b in range(n_boot):
+        boots[b] = rng.choice(vals, size=n, replace=True).mean()
+    z0 = stats.norm.ppf(np.mean(boots < point).clip(1e-6, 1 - 1e-6))
+    jack = np.array([np.delete(vals, i).mean() for i in range(n)])
+    jbar = jack.mean()
+    num = np.sum((jbar - jack) ** 3)
+    den = 6 * (np.sum((jbar - jack) ** 2) ** 1.5)
+    a = num / den if den != 0 else 0.0
+    alpha = (100.0 - ci) / 2.0 / 100.0
+    z_lo = z0 + (z0 + stats.norm.ppf(alpha)) / (1 - a * (z0 + stats.norm.ppf(alpha)))
+    z_hi = z0 + (z0 + stats.norm.ppf(1 - alpha)) / (1 - a * (z0 + stats.norm.ppf(1 - alpha)))
+    lo = float(np.quantile(boots, stats.norm.cdf(z_lo)))
+    hi = float(np.quantile(boots, stats.norm.cdf(z_hi)))
+    return point, lo, hi
 
 
 # ============================================================
@@ -975,8 +993,8 @@ def figure3(school_df: pd.DataFrame, track_metrics: pd.DataFrame,
       (a) Dot plot of (clinical M2-binary, research M2-binary) by school,
           colored by profession, with jitter and a framed college key.
       (b) Grouped bar plot of MEAN M1 crude credits by profession x track
-          (clinical vs research) with 95% percentile-bootstrap CI error bars
-          (10,000 resamples, seed=42), with a framed track key below.
+          (clinical vs research) with 95% BCa-bootstrap CI error bars
+          (1,000 resamples, seed=42), with a framed track key below.
       (c) Asymmetry counts bar.
     """
     # Size the figure so panel a's grid slot is SQUARE: then the equal-aspect
